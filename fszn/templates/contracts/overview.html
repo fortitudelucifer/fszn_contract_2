@@ -17,6 +17,11 @@
     <strong>当前状态：</strong>{{ status_text }}（级别：{{ status_level }}）
 </p>
 
+<p>
+    <a href="{{ url_for('contracts.contract_operation_logs', contract_id=contract.id) }}">查看该合同操作日志</a>
+</p>
+
+
 {% if finance is defined %}
 <h2>财务总览</h2>
 <table border="1" cellpadding="4" cellspacing="0">

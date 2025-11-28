@@ -50,6 +50,9 @@ class Contract(db.Model):
     # 简单状态（后面可以细化）
     status = db.Column(db.String(50), default='新建')
 
+    # 计划交付时间（可选）
+    planned_delivery_date = db.Column(db.Date, nullable=True)
+
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     # 创建人（内部员工）
@@ -293,3 +296,33 @@ class ProjectFile(db.Model):
 
     contract = db.relationship('Contract', backref='files')
     uploader = db.relationship('User', backref='uploaded_files')
+
+class OperationLog(db.Model):
+    """操作审计日志：记录谁在什么时候对什么做了什么事情"""
+    __tablename__ = 'operation_logs'
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    # 操作用户（可以为空，比如系统任务）
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+
+    # 操作动作代号，比如：contract.delete / contract.set_planned_delivery_date
+    action = db.Column(db.String(100), nullable=False)
+
+    # 目标类型，比如：Contract / Task / File
+    target_type = db.Column(db.String(50), nullable=True)
+
+    # 目标主键 ID
+    target_id = db.Column(db.Integer, nullable=True)
+
+    # 简单说明（便于人类阅读）
+    message = db.Column(db.String(500), nullable=True)
+
+    # 扩展数据，JSON 字符串（比如记录项目编号、合同编号等）
+    extra_data = db.Column(db.Text, nullable=True)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    user = db.relationship('User', backref='operation_logs')
+
+

@@ -2,7 +2,7 @@
 
 from functools import wraps
 from datetime import datetime, date
-import os
+import os, json
 from decimal import Decimal
 
 from flask import (
@@ -16,21 +16,56 @@ from .models import (
     Contract, Company, User,
     Department, Person, ProjectDepartmentLeader,
     Task, ProcurementItem, Acceptance, Payment, Invoice, Refund, Feedback,
-    SalesInfo, ProjectFile
+    SalesInfo, ProjectFile, OperationLog
 )
+
+# 操作日志记录函数
+
+def log_operation(
+    user: User | None,
+    action: str,
+    target_type: str | None = None,
+    target_id: int | None = None,
+    message: str | None = None,
+    extra: dict | None = None,
+) -> None:
+    """记录一条操作日志（不提交事务，由调用方统一 commit）"""
+    extra_data = None
+    if extra:
+        try:
+            extra_data = json.dumps(extra, ensure_ascii=False)
+        except Exception:
+            # 防御性处理：即便 extra 序列化失败，也不要影响业务
+            extra_data = None
+
+    log = OperationLog(
+        user_id=user.id if user else None,
+        action=action,
+        target_type=target_type,
+        target_id=target_id,
+        message=message,
+        extra_data=extra_data,
+    )
+    db.session.add(log)
 
 
 
 # 根据任务、验收、付款、反馈等情况计算项目状态
 
 def get_contract_status(contract: Contract):
-    """根据任务、验收、付款、反馈等情况计算项目状态"""
+    """根据任务、验收、付款、反馈等情况计算项目状态（统一为 5 种业务状态）"""
     cid = contract.id
 
+    # 是否有任何执行/记录
     has_tasks = Task.query.filter_by(contract_id=cid).count() > 0
-    has_acceptance = Acceptance.query.filter_by(contract_id=cid).count() > 0
     has_payments = Payment.query.filter_by(contract_id=cid).count() > 0
     has_invoices = Invoice.query.filter_by(contract_id=cid).count() > 0
+
+    # 验收记录
+    acceptance_q = Acceptance.query.filter_by(contract_id=cid)
+    has_acceptance = acceptance_q.count() > 0
+    # 是否有通过的验收
+    has_accepted = acceptance_q.filter_by(status='通过').count() > 0
 
     # 有未解决反馈？
     has_unresolved_feedback = Feedback.query.filter_by(
@@ -38,24 +73,30 @@ def get_contract_status(contract: Contract):
         is_resolved=False
     ).count() > 0
 
-    # 规则可以慢慢打磨，现在先用一个简化版：
+    # 1）未启动：什么记录都没有
     if (not has_tasks) and (not has_acceptance) and (not has_payments) and (not has_invoices):
         return "未启动", "grey"
 
-    if has_tasks and not has_acceptance:
+    # 2）生产中：还没有任何“通过”的验收，但已经开始执行
+    if not has_accepted:
+        # 有任务 / 有验收记录（进行中或不通过） / 有发票等，都可以认为已经在执行
         return "生产中", "blue"
 
-    if has_acceptance and not has_payments:
+    # 3）已验收，待回款：有通过验收，但一分钱还没收到
+    if has_accepted and (not has_payments):
         return "已验收，待回款", "orange"
 
-    if has_acceptance and has_payments and has_unresolved_feedback:
+    # 4）已回款，有未解决问题：有通过验收 + 有收款 + 有未解决反馈
+    if has_accepted and has_payments and has_unresolved_feedback:
         return "已回款，有未解决问题", "red"
 
-    if has_acceptance and has_payments and not has_unresolved_feedback:
+    # 5）已完成：有通过验收 + 有收款 + 没有未解决反馈
+    if has_accepted and has_payments and (not has_unresolved_feedback):
         return "已完成", "green"
 
-    # 兜底
-    return "进行中", "blue"
+    # 理论上不会走到这里，但为了安全，统一归为“生产中”
+    return "生产中", "blue"
+
 
 # 状态筛选用的映射：URL 参数值 -> 状态文本
 STATUS_FILTERS = {
@@ -187,69 +228,67 @@ def list_contracts():
     sales_kw = (request.args.get('sales') or '').strip()
     leader_kw = (request.args.get('leader') or '').strip()
     status_param = (request.args.get('status') or '').strip()
-
-     # 取值约定：
-    #   '' 或 None              -> 按创建时间(新→旧)
-    #   'created_at_asc'        -> 按创建时间(旧→新)
-    #   'deal_date_desc'        -> 按成交日期(新→旧)
-    #   'deal_date_asc'         -> 按成交日期(旧→新)
-    #   'status_asc' / 'status_desc' -> 按状态文本排序（Python 层）
+    # 新增：排序参数
+    #   '' / None              -> 按创建时间(新→旧)
+    #   'created_at_asc'       -> 按创建时间(旧→新)
+    #   'deal_date_desc'       -> 按成交日期(新→旧)
+    #   'deal_date_asc'        -> 按成交日期(旧→新)
+    #   'status_asc/desc'      -> 按状态文本排序（Python 层）
     order_param = (request.args.get('order') or '').strip()
 
     # 基础查询
     query = Contract.query
 
+    # 公司名称模糊匹配
     if company_kw:
         query = query.join(Company).filter(Company.name.ilike(f"%{company_kw}%"))
 
+    # 项目编号模糊匹配
     if project_kw:
         query = query.filter(Contract.project_code.ilike(f"%{project_kw}%"))
 
+    # 合同编号模糊匹配
     if contract_no_kw:
         query = query.filter(Contract.contract_number.ilike(f"%{contract_no_kw}%"))
 
+    # 销售负责人模糊匹配
+    sales_joined = False
     if sales_kw:
-        # 只在需要时关联销售信息和销售负责人
         query = (
             query.join(SalesInfo, SalesInfo.contract_id == Contract.id)
                  .join(Person, Person.id == SalesInfo.sales_person_id)
                  .filter(Person.name.ilike(f"%{sales_kw}%"))
         )
+        sales_joined = True
 
+    # 部门负责人模糊匹配
     if leader_kw:
-        # 只在需要时关联部门负责人
         query = (
             query.join(ProjectDepartmentLeader, ProjectDepartmentLeader.contract_id == Contract.id)
                  .join(Person, Person.id == ProjectDepartmentLeader.person_id)
                  .filter(Person.name.ilike(f"%{leader_kw}%"))
         )
 
-    # 根据排序参数设置数据库层排序（创建时间 / 成交日期）
-    # 说明：
-    # - created_at：在 Contract 表上直接排序
-    # - deal_date：需要关联 SalesInfo
+    # ========= 1）数据库层排序 =========
     if order_param in ('deal_date_asc', 'deal_date_desc'):
-        # 如果前面没有按销售人员过滤，这里补一个外连接
-        if not sales_kw:
+        # 成交日期排序，需要关联 SalesInfo，如果前面没因 sales_kw 关联则补一个外连接
+        if not sales_joined:
             query = query.outerjoin(SalesInfo, SalesInfo.contract_id == Contract.id)
 
         if order_param == 'deal_date_asc':
             query = query.order_by(SalesInfo.deal_date.asc(), Contract.created_at.desc())
         else:
-            # 默认成交日期(新→旧)
             query = query.order_by(SalesInfo.deal_date.desc(), Contract.created_at.desc())
     else:
         # 默认按创建时间排序
         if order_param == 'created_at_asc':
             query = query.order_by(Contract.created_at.asc())
         else:
-            # 创建时间(新→旧)
             query = query.order_by(Contract.created_at.desc())
 
     contracts = query.all()
 
-
-    # 去重（避免因 join 产生重复）
+    # ========= 2）去重（避免 join 产生重复） =========
     unique_contracts = []
     seen_ids = set()
     for c in contracts:
@@ -259,11 +298,10 @@ def list_contracts():
         unique_contracts.append(c)
     contracts = unique_contracts
 
-    # 1）构造：每个合同的 “部门 -> [负责人列表]”
+    # ========= 3）构造“部门 -> [负责人列表]” =========
     leaders_by_contract = {}
     for c in contracts:
         dept_map = {}
-        # 这里用 department_id / person_id 排序，遵守“用 id 控制顺序”的原则
         for l in sorted(
             c.department_leaders,
             key=lambda x: ((x.department_id or 0), (x.person_id or 0))
@@ -274,13 +312,13 @@ def list_contracts():
             dept_map.setdefault(dept_name, []).append(l.person)
         leaders_by_contract[c.id] = dept_map
 
-    # 2）为每个合同计算状态（get_contract_status）
+    # ========= 4）为每个合同计算状态 =========
     status_map = {}
     for c in contracts:
         st_text, st_level = get_contract_status(c)
         status_map[c.id] = dict(text=st_text, level=st_level)
 
-    # 3）按状态参数进行二次过滤（在 Python 层处理）
+    # ========= 5）按状态参数进行二次过滤（Python 层） =========
     status_filter_text = STATUS_FILTERS.get(status_param) if status_param else None
     if status_filter_text:
         filtered_contracts = []
@@ -295,17 +333,16 @@ def list_contracts():
         contracts = filtered_contracts
         status_map = filtered_status_map
 
-    # 4）按状态文本排序（在 Python 层处理）
+    # ========= 6）按状态文本排序（Python 层） =========
     if order_param in ('status_asc', 'status_desc'):
         reverse = (order_param == 'status_desc')
 
         def status_key(c: Contract):
             st = status_map.get(c.id)
-            # 没状态的排在最后
+            # 没状态的排最后
             return st['text'] if st and st.get('text') else 'ZZZZZZ'
 
         contracts = sorted(contracts, key=status_key, reverse=reverse)
-
 
     return render_template(
         'contracts/list.html',
@@ -313,7 +350,7 @@ def list_contracts():
         contracts=contracts,
         leaders_by_contract=leaders_by_contract,
         statuses=status_map,
-        # 把当前查询参数传过去，方便模板回填
+        # 把当前查询/排序参数传给模板，以便回填表单
         company_kw=company_kw,
         project_kw=project_kw,
         contract_no_kw=contract_no_kw,
@@ -322,7 +359,183 @@ def list_contracts():
         status_param=status_param,
         order_param=order_param,
     )
+
+# 操作日志列表
+
+@contracts_bp.route('/operation_logs')
+@login_required
+def operation_logs():
+    """操作日志列表（最近若干条，全局）"""
+    user_id = session.get('user_id')
+    current_user = User.query.get(user_id) if user_id else None
+
+    # 查询参数
+    action_kw = (request.args.get('action') or '').strip()
+    target_type = (request.args.get('target_type') or '').strip()
+    target_id_raw = (request.args.get('target_id') or '').strip()
+
+    query = OperationLog.query.order_by(OperationLog.created_at.desc())
+
+    if action_kw:
+        query = query.filter(OperationLog.action.ilike(f"%{action_kw}%"))
+
+    if target_type:
+        query = query.filter(OperationLog.target_type == target_type)
+
+    target_id = None
+    if target_id_raw:
+        try:
+            target_id = int(target_id_raw)
+            query = query.filter(OperationLog.target_id == target_id)
+        except ValueError:
+            target_id = None
+
+    logs = query.limit(200).all()
+
+    # 预加载用户
+    user_ids = {l.user_id for l in logs if l.user_id}
+    users_map: dict[int, User] = {}
+    if user_ids:
+        for u in User.query.filter(User.id.in_(user_ids)):
+            users_map[u.id] = u
+
+    # 构造更适合模板使用的 rows
+    rows = []
+    for log in logs:
+        extra = _parse_extra_data(log.extra_data)
+        user_obj = users_map.get(log.user_id) if log.user_id else None
+        rows.append(
+            dict(
+                log=log,
+                user=user_obj,
+                extra=extra,
+            )
+        )
+
+    return render_template(
+        'contracts/operation_logs.html',
+        user=current_user,
+        rows=rows,
+        filters=dict(
+            action=action_kw,
+            target_type=target_type,
+            target_id=target_id_raw,
+        ),
     )
+
+
+
+
+
+# 某个合同的操作日志
+
+@contracts_bp.route('/<int:contract_id>/operation_logs')
+@login_required
+def contract_operation_logs(contract_id):
+    """某个合同相关的操作日志"""
+    user_id = session.get('user_id')
+    current_user = User.query.get(user_id) if user_id else None
+
+    contract = Contract.query.get_or_404(contract_id)
+
+    # 先简单只看 target_type='Contract' 的日志
+    logs = (
+        OperationLog.query
+        .filter_by(target_type='Contract', target_id=contract.id)
+        .order_by(OperationLog.created_at.desc())
+        .limit(200)
+        .all()
+    )
+
+    user_ids = {l.user_id for l in logs if l.user_id}
+    users_map = {}
+    if user_ids:
+        for u in User.query.filter(User.id.in_(user_ids)):
+            users_map[u.id] = u
+
+    # 构造 rows（和全局日志接口保持一致）
+    rows = []
+    for log in logs:
+        extra = _parse_extra_data(log.extra_data)
+        user_obj = users_map.get(log.user_id) if log.user_id else None
+        rows.append(
+            dict(
+                log=log,
+                user=user_obj,
+                extra=extra,
+            )
+        )
+
+    return render_template(
+        'contracts/operation_logs.html',
+        user=current_user,
+        rows=rows,
+        filters=dict(
+            action='',
+            target_type='Contract',
+            target_id=str(contract.id),
+        ),
+        current_contract=contract,
+    )
+
+
+
+
+# 更新合同的计划交付时间
+
+@contracts_bp.route('/<int:contract_id>/set_planned_delivery', methods=['POST'])
+@login_required
+def set_planned_delivery(contract_id):
+    """在列表页直接更新合同的计划交付时间"""
+    user_id = session.get('user_id')
+    user = User.query.get(user_id) if user_id else None
+
+    contract = Contract.query.get_or_404(contract_id)
+
+    date_str = (request.form.get('planned_delivery_date') or '').strip()
+    planned_date = parse_date(date_str)  # 失败返回 None
+
+    contract.planned_delivery_date = planned_date
+
+    # 🔹 记录操作日志
+    log_operation(
+        user=user,
+        action='contract.set_planned_delivery_date',
+        target_type='Contract',
+        target_id=contract.id,
+        message=f"更新计划交付时间为 {planned_date}" if planned_date else "清空计划交付时间",
+        extra={
+            "planned_delivery_date": planned_date.isoformat() if planned_date else None,
+            "project_code": contract.project_code,
+            "contract_number": contract.contract_number,
+        },
+    )
+
+
+    db.session.commit()
+
+    flash('计划交付时间已更新')
+
+    # 返回列表页（尽量保留原来的查询参数）
+    ref = request.referrer
+    if ref:
+        return redirect(ref)
+    return redirect(url_for('contracts.list_contracts'))
+
+
+# 解析 extra_data 字段
+
+def _parse_extra_data(extra_data: str | None) -> dict:
+    """解析 OperationLog.extra_data 的 JSON 字符串，失败则返回空字典"""
+    if not extra_data:
+        return {}
+    try:
+        data = json.loads(extra_data)
+        if isinstance(data, dict):
+            return data
+        return {}
+    except Exception:
+        return {}
 
 
 
@@ -382,6 +595,63 @@ def new_contract():
 
     return render_template('contracts/new.html', user=user)
 
+
+# 删除项目/合同及其关联记录
+
+@contracts_bp.route('/<int:contract_id>/delete', methods=['POST'])
+@login_required
+def delete_contract(contract_id):
+    """删除合同及其关联记录（任务、采购、验收、款项、销售、文件等）"""
+    user_id = session.get('user_id')
+    user = User.query.get(user_id) if user_id else None
+
+    contract = Contract.query.get_or_404(contract_id)
+    cid = contract.id
+
+    # 🔹 在删除前记录操作日志（保存一些关键信息）
+    log_operation(
+        user=user,
+        action='contract.delete',
+        target_type='Contract',
+        target_id=cid,
+        message=f"删除合同：{contract.name or ''}",
+        extra={
+            "company": contract.company.name if contract.company else None,
+            "project_code": contract.project_code,
+            "contract_number": contract.contract_number,
+        },
+    )
+
+
+
+    # TODO：可以加权限控制，例如只允许 admin / boss 删除
+    # if not user or user.role not in ('admin', 'boss'):
+    #     flash('无权限删除合同')
+    #     return redirect(url_for('contracts.list_contracts'))
+
+    # 先删所有子记录，避免外键约束冲突
+    Task.query.filter_by(contract_id=cid).delete(synchronize_session=False)
+    ProcurementItem.query.filter_by(contract_id=cid).delete(synchronize_session=False)
+    Acceptance.query.filter_by(contract_id=cid).delete(synchronize_session=False)
+    Payment.query.filter_by(contract_id=cid).delete(synchronize_session=False)
+    Invoice.query.filter_by(contract_id=cid).delete(synchronize_session=False)
+    Refund.query.filter_by(contract_id=cid).delete(synchronize_session=False)
+    Feedback.query.filter_by(contract_id=cid).delete(synchronize_session=False)
+    ProjectDepartmentLeader.query.filter_by(contract_id=cid).delete(synchronize_session=False)
+    # 🔹 关键：显式删除 sales_infos 里所有引用该合同的记录
+    SalesInfo.query.filter_by(contract_id=cid).delete(synchronize_session=False)
+    ProjectFile.query.filter_by(contract_id=cid).delete(synchronize_session=False)
+
+    # 最后删除合同本身
+    db.session.delete(contract)
+    db.session.commit()
+
+    flash('合同及相关记录已删除')
+    return redirect(url_for('contracts.list_contracts'))
+
+
+
+# 部门负责人管理
 
 @contracts_bp.route('/<int:contract_id>/leaders', methods=['GET', 'POST'])
 @login_required
@@ -628,6 +898,17 @@ def manage_procurements(contract_id):
 def delete_procurement(contract_id, item_id):
     contract = Contract.query.get_or_404(contract_id)
     item = ProcurementItem.query.filter_by(id=item_id, contract_id=contract.id).first_or_404()
+    log_operation(
+        user=user,
+        action='procurement.delete',
+        target_type='ProcurementItem',
+        target_id=item.id,
+        message=f"删除采购项：{item.item_name}",
+        extra={
+            "contract_id": contract.id,
+            "project_code": contract.project_code,
+         },
+    )
     db.session.delete(item)
     db.session.commit()
     flash('采购项已删除')
@@ -700,6 +981,19 @@ def manage_acceptances(contract_id):
 def delete_acceptance(contract_id, acc_id):
     contract = Contract.query.get_or_404(contract_id)
     acc = Acceptance.query.filter_by(id=acc_id, contract_id=contract.id).first_or_404()
+    log_operation(
+        user=user,
+        action='acceptance.delete',
+        target_type='Acceptance',
+        target_id=acc.id,
+        message=f"删除验收记录：{acc.stage_name}",
+        extra={
+            "contract_id": contract.id,
+            "date": acc.date.isoformat() if acc.date else None,
+            "status": acc.status,
+        },
+    )
+
     db.session.delete(acc)
     db.session.commit()
     flash('验收记录已删除')
@@ -797,6 +1091,20 @@ def delete_sales(contract_id):
     if not sales:
         flash('当前项目没有销售信息可删除')
         return redirect(url_for('contracts.manage_sales', contract_id=contract.id))
+
+    # 🔹 写日志再删除
+    log_operation(
+        user=user,
+        action='sales.delete',
+        target_type='SalesInfo',
+        target_id=sales.id,
+        message='删除销售信息',
+        extra={
+            "contract_id": contract.id,
+            "project_code": contract.project_code,
+            "contract_number": contract.contract_number,
+        },
+    )
 
     db.session.delete(sales)
     db.session.commit()
@@ -955,6 +1263,18 @@ def manage_payments(contract_id):
 def delete_payment(contract_id, pay_id):
     contract = Contract.query.get_or_404(contract_id)
     p = Payment.query.filter_by(id=pay_id, contract_id=contract.id).first_or_404()
+    log_operation(
+        user=user,
+        action='payment.delete',
+        target_type='Payment',
+        target_id=p.id,
+        message=f"删除付款记录：金额={p.amount}",
+        extra={
+            "contract_id": contract.id,
+            "date": p.date.isoformat() if p.date else None,
+        },
+    )
+
     db.session.delete(p)
     db.session.commit()
     flash('付款记录已删除')
@@ -1020,6 +1340,19 @@ def manage_invoices(contract_id):
 def delete_invoice(contract_id, inv_id):
     contract = Contract.query.get_or_404(contract_id)
     inv = Invoice.query.filter_by(id=inv_id, contract_id=contract.id).first_or_404()
+    log_operation(
+        user=user,
+        action='invoice.delete',
+        target_type='Invoice',
+        target_id=inv.id,
+        message=f"删除开票记录：发票号={inv.invoice_number or ''}",
+        extra={
+            "contract_id": contract.id,
+            "amount": float(inv.amount) if inv.amount is not None else None,
+            "date": inv.date.isoformat() if inv.date else None,
+        },
+    )
+
     db.session.delete(inv)
     db.session.commit()
     flash('开票记录已删除')
@@ -1356,6 +1689,20 @@ def delete_file(contract_id, file_id):
         return redirect(url_for('contracts.manage_files', contract_id=contract.id))
 
     pf.is_deleted = True
+
+    # 🔹 写入操作日志
+    log_operation(
+        user=user,
+        action='file.delete_soft',
+        target_type='ProjectFile',
+        target_id=pf.id,
+        message=f"软删除文件：{pf.original_filename}",
+        extra={
+            "contract_id": contract.id,
+            "stored_filename": pf.stored_filename,
+            "file_type": pf.file_type,
+        },
+    )
     db.session.commit()
 
     flash('文件已标记为删除（普通用户将无法再访问）')
