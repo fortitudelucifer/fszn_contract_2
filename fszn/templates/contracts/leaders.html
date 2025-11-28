@@ -1,0 +1,100 @@
+{% extends 'base.html' %}
+
+{% block title %}项目部门负责人 - {{ contract.project_code }}{% endblock %}
+
+{% block content %}
+<h1>项目部门负责人</h1>
+
+<p>
+    <strong>项目编号：</strong> {{ contract.project_code }}<br>
+    <strong>合同名称：</strong> {{ contract.name }}<br>
+    <strong>客户公司：</strong> {{ contract.company.name if contract.company else '' }}
+</p>
+
+<!-- 顶部导航，方便在各模块之间切换 -->
+<p>
+    <a href="{{ url_for('contracts.list_contracts') }}">返回项目列表</a> |
+    <a href="{{ url_for('contracts.manage_leaders', contract_id=contract.id) }}">部门负责人</a> |
+    <a href="{{ url_for('contracts.manage_tasks', contract_id=contract.id) }}">任务/进度</a> |
+    <a href="{{ url_for('contracts.manage_procurements', contract_id=contract.id) }}">采购清单</a> |
+    <a href="{{ url_for('contracts.manage_acceptances', contract_id=contract.id) }}">验收</a> |
+    <a href="{{ url_for('contracts.manage_payments', contract_id=contract.id) }}">付款</a> |
+    <a href="{{ url_for('contracts.manage_invoices', contract_id=contract.id) }}">开票</a> |
+    <a href="{{ url_for('contracts.manage_refunds', contract_id=contract.id) }}">退款</a> |
+    <a href="{{ url_for('contracts.manage_feedbacks', contract_id=contract.id) }}">客户反馈</a>
+    <a href="{{ url_for('contracts.manage_files', contract_id=contract.id) }}">文件</a>
+
+</p>
+
+<h2>已配置的部门负责人</h2>
+
+  {% if leaders %}
+<table border="1" cellpadding="4" cellspacing="0">
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>部门</th>
+            <th>负责人</th>
+            <th>职位</th>
+            <th>操作</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for item in leaders %}
+        <tr>
+            <td>{{ item.id }}</td>
+            <td>{{ item.department.name }}</td>
+            <td>{{ item.person.name }}</td>
+            <td>{{ item.person.position }}</td>
+            <td>
+                <form method="post"
+                      action="{{ url_for('contracts.delete_leader',
+                                       contract_id=contract.id,
+                                       leader_id=item.id) }}"
+                      style="display:inline;">
+                    <button type="submit"
+                            onclick="return confirm('确认删除该负责人？');">
+                        删除
+                    </button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+  {% else %}
+<p>当前还没有配置任何部门负责人。</p>
+  {% endif %}
+
+<h2>新增部门负责人</h2>
+
+<form method="post">
+    <p>
+        <label>
+            部门：
+            <select name="department_id">
+                <option value="">请选择部门</option>
+                {% for d in departments %}
+                <option value="{{ d.id }}">{{ d.name }} (ID={{ d.id }})</option>
+                {% endfor %}
+            </select>
+        </label>
+    </p>
+    <p>
+        <label>
+            负责人：
+            <select name="person_id">
+                <option value="">请选择人员</option>
+                {% for p in persons %}
+                <option value="{{ p.id }}">{{ p.name }} - {{ p.position }} (ID={{ p.id }})</option>
+                {% endfor %}
+            </select>
+        </label>
+    </p>
+
+    <p>
+        <button type="submit">添加</button>
+    </p>
+</form>
+
+{% endblock %}

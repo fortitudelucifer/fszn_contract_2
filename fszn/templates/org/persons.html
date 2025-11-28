@@ -1,0 +1,51 @@
+{% extends 'base.html' %}
+
+{% block title %}人员列表{% endblock %}
+
+{% block content %}
+<h1>人员列表</h1>
+
+<p>
+    <a href="{{ url_for('org.new_person') }}">新增人员</a>
+    |
+    <a href="{{ url_for('org.list_departments') }}">返回部门列表</a>
+</p>
+
+{% if persons %}
+<table border="1" cellpadding="4" cellspacing="0">
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>姓名</th>
+            <th>部门</th>
+            <th>职位</th>
+            <th>操作</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for p in persons %}
+        <tr>
+            <td>{{ p.id }}</td>
+            <td>{{ p.name }}</td>
+            <td>{{ p.department.name if p.department else '' }}</td>
+            <td>{{ p.position }}</td>
+            <td>
+                <a href="{{ url_for('org.edit_person', person_id=p.id) }}">编辑</a>
+                |
+                <form method="post"
+                      action="{{ url_for('org.delete_person', person_id=p.id) }}"
+                      style="display:inline;">
+                    <button type="submit"
+                            onclick="return confirm('确认删除该人员？');">
+                        删除
+                    </button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>当前还没有人员。</p>
+{% endif %}
+{% endblock %}

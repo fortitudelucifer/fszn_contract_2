@@ -1,0 +1,44 @@
+{% extends 'base.html' %}
+
+{% block title %}部门列表{% endblock %}
+
+{% block content %}
+<h1>部门列表</h1>
+
+<p>
+    <a href="{{ url_for('org.new_department') }}">新增部门</a>
+    |
+    <a href="{{ url_for('org.list_persons') }}">查看人员列表</a>
+</p>
+
+  {% if departments %}
+<table border="1" cellpadding="4" cellspacing="0">
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>部门名称</th>
+            <th>操作</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for d in departments %}
+        <tr>
+            <td>{{ d.id }}</td>
+            <td>{{ d.name }}</td>
+            <td>
+                <form method="post"
+                      action="{{ url_for('org.delete_department', dept_id=d.id) }}"
+                      style="display:inline;">
+                    <button type="submit"
+                            onclick="return confirm('确认删除该部门？');">
+                        删除
+                    </button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+    {% else %}
+    <p>当前还没有部门。</p>
+    {% endif %}
+    {% endblock %}

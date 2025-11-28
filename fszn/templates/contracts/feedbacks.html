@@ -1,0 +1,126 @@
+{% extends 'base.html' %}
+
+{% block title %}客户反馈 - {{ contract.project_code }}{% endblock %}
+
+{% block content %}
+<h1>客户反馈与处理情况</h1>
+
+<p>
+    <strong>项目编号：</strong>{{ contract.project_code }}<br>
+    <strong>合同名称：</strong>{{ contract.name }}
+</p>
+
+<!-- 导航 -->
+<p>
+    <a href="{{ url_for('contracts.list_contracts') }}">返回项目列表</a> |
+    <a href="{{ url_for('contracts.manage_leaders', contract_id=contract.id) }}">部门负责人</a> |
+    <a href="{{ url_for('contracts.manage_tasks', contract_id=contract.id) }}">任务/进度</a> |
+    <a href="{{ url_for('contracts.manage_procurements', contract_id=contract.id) }}">采购清单</a> |
+    <a href="{{ url_for('contracts.manage_acceptances', contract_id=contract.id) }}">验收</a> |
+    <a href="{{ url_for('contracts.manage_payments', contract_id=contract.id) }}">付款</a> |
+    <a href="{{ url_for('contracts.manage_invoices', contract_id=contract.id) }}">开票</a> |
+    <a href="{{ url_for('contracts.manage_refunds', contract_id=contract.id) }}">退款</a> |
+    <a href="{{ url_for('contracts.manage_feedbacks', contract_id=contract.id) }}">客户反馈</a> |
+    <a href="{{ url_for('contracts.manage_files', contract_id=contract.id) }}">文件</a>
+
+</p>
+
+<h2>反馈列表</h2>
+  {% if records %}
+<table border="1" cellpadding="4" cellspacing="0">
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>反馈时间</th>
+            <th>反馈内容</th>
+            <th>处理人</th>
+            <th>处理结果</th>
+            <th>完成时间</th>
+            <th>状态</th>
+            <th>操作</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for r in records %}
+        <tr>
+            <td>{{ r.id }}</td>
+            <td>{{ r.feedback_time.strftime('%Y-%m-%d %H:%M:%S') if r.feedback_time else ''  }}</td>
+            <td>{{ r.content }}</td>
+            <td>{{ r.handler.name if r.handler else '' }}</td>
+            <td>{{ r.result or '' }}</td>
+            <td>{{ r.completion_time.strftime('%Y-%m-%d %H:%M:%S') if r.completion_time else ''  }}</td>
+            <td>
+                {% if r.is_resolved %}
+                <span style="color:green;">已解决</span>
+                {% else %}
+                <span style="color:red;">未解决</span>
+                {% endif %}
+            </td>
+            <td>
+                {% if r.is_resolved %}
+                <form method="post"
+                      action="{{ url_for('contracts.unresolve_feedback', contract_id=contract.id, feedback_id=r.id) }}"
+                      style="display:inline;">
+                    <button type="submit">标记为未解决</button>
+                </form>
+                {% else %}
+                <form method="post"
+                      action="{{ url_for('contracts.resolve_feedback', contract_id=contract.id, feedback_id=r.id) }}"
+                      style="display:inline;">
+                    <button type="submit">标记为已解决</button>
+                </form>
+                {% endif %}
+                |
+                <form method="post"
+                      action="{{ url_for('contracts.delete_feedback', contract_id=contract.id, feedback_id=r.id) }}"
+                      style="display:inline;">
+                    <button type="submit"
+                            onclick="return confirm('确认删除该反馈？');">
+                        删除
+                    </button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+  {% else %}
+<p>当前还没有反馈记录。</p>
+  {% endif %}
+
+<h2>新增反馈</h2>
+<form method="post">
+    <p>
+        <label>
+            反馈内容：
+            <textarea name="content" rows="3" cols="70"></textarea>
+        </label>
+    </p>
+    <p>
+        <label>
+            处理人（可选）：
+            <select name="handler_id">
+                <option value="">可不选</option>
+                {% for p in persons %}
+                <option value="{{ p.id }}">{{ p.name }} - {{ p.position }} (ID={{ p.id }})</option>
+                {% endfor %}
+            </select>
+        </label>
+    </p>
+    <p>
+        <label>
+            处理结果（可选）：
+            <textarea name="result" rows="3" cols="70"></textarea>
+        </label>
+    </p>
+    <p>
+        <label>
+            处理完成日期（可选）：
+            <input type="date" name="completion_date">
+        </label>
+    </p>
+    <p>
+        <button type="submit">保存反馈记录</button>
+    </p>
+</form>
+{% endblock %}

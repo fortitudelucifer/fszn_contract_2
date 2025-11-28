@@ -1,0 +1,38 @@
+{% extends 'base.html' %}
+
+{% block title %}编辑人员 - {{ person.name }}{% endblock %}
+
+{% block content %}
+<h1>编辑人员</h1>
+
+<p>
+    <a href="{{ url_for('org.list_persons') }}">返回人员列表</a>
+</p>
+
+<form method="post">
+    <p>
+        姓名：
+        <input type="text" name="name" value="{{ person.name }}">
+    </p>
+    <p>
+        部门：
+        <select name="department_id">
+            <option value="">-- 请选择部门 --</option>
+            {% for d in departments %}
+                <option value="{{ d.id }}"
+                        {% if person.department_id == d.id %}selected{% endif %}>
+                    {{ d.name }}
+                </option>
+            {% endfor %}
+        </select>
+    </p>
+    <p>
+        职位（例如：工程师 / 会计 / 采购员 / 销售员）：
+        <input type="text" name="position" value="{{ person.position }}">
+    </p>
+    <p>
+        <button type="submit">保存</button>
+        <a href="{{ url_for('org.list_persons') }}">取消</a>
+    </p>
+</form>
+{% endblock %}

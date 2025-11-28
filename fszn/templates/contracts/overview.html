@@ -1,0 +1,137 @@
+{% extends 'base.html' %}
+
+{% block title %}项目总览 - {{ contract.project_code }}{% endblock %}
+
+{% block content %}
+<h1>项目 / 合同总览</h1>
+
+<p>
+    <strong>项目编号：</strong>{{ contract.project_code }}<br>
+    <strong>合同编号：</strong>{{ contract.contract_number or '' }}<br>
+    <strong>合同名称：</strong>{{ contract.name }}<br>
+    <strong>客户公司：</strong>{{ contract.company.name if contract.company else '' }}<br>
+    <strong>我方负责人：</strong>{{ contract.our_manager or '' }}<br>
+</p>
+
+<!-- 顶部导航 -->
+<p>
+    <a href="{{ url_for('contracts.list_contracts') }}">返回项目列表</a> |
+    <a href="{{ url_for('contracts.contract_overview', contract_id=contract.id) }}">总览</a> |
+    <a href="{{ url_for('contracts.manage_sales', contract_id=contract.id) }}">销售信息</a> |
+    <a href="{{ url_for('contracts.manage_leaders', contract_id=contract.id) }}">部门负责人</a> |
+    <a href="{{ url_for('contracts.manage_tasks', contract_id=contract.id) }}">任务 / 生产进度</a> |
+    <a href="{{ url_for('contracts.manage_procurements', contract_id=contract.id) }}">采购清单</a> |
+    <a href="{{ url_for('contracts.manage_acceptances', contract_id=contract.id) }}">验收</a> |
+    <a href="{{ url_for('contracts.manage_payments', contract_id=contract.id) }}">付款</a> |
+    <a href="{{ url_for('contracts.manage_invoices', contract_id=contract.id) }}">开票</a> |
+    <a href="{{ url_for('contracts.manage_refunds', contract_id=contract.id) }}">退款</a> |
+    <a href="{{ url_for('contracts.manage_feedbacks', contract_id=contract.id) }}">客户反馈</a> |
+    <a href="{{ url_for('contracts.manage_files', contract_id=contract.id) }}">文件</a>
+</p>
+
+<!-- 核心统计 -->
+<h2>流程统计概览</h2>
+<table border="1" cellpadding="4" cellspacing="0">
+    <thead>
+        <tr>
+            <th>模块</th>
+            <th>记录数量</th>
+            <th>快速入口</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td>任务 / 生产进度</td>
+            <td>{{ stats.tasks }}</td>
+            <td><a href="{{ url_for('contracts.manage_tasks', contract_id=contract.id) }}">查看任务</a></td>
+        </tr>
+        <tr>
+            <td>采购清单</td>
+            <td>{{ stats.proc }}</td>
+            <td><a href="{{ url_for('contracts.manage_procurements', contract_id=contract.id) }}">查看采购</a></td>
+        </tr>
+        <tr>
+            <td>验收记录</td>
+            <td>{{ stats.acc }}</td>
+            <td><a href="{{ url_for('contracts.manage_acceptances', contract_id=contract.id) }}">查看验收</a></td>
+        </tr>
+        <tr>
+            <td>付款记录</td>
+            <td>{{ stats.pay }}</td>
+            <td><a href="{{ url_for('contracts.manage_payments', contract_id=contract.id) }}">查看付款</a></td>
+        </tr>
+        <tr>
+            <td>开票记录</td>
+            <td>{{ stats.inv }}</td>
+            <td><a href="{{ url_for('contracts.manage_invoices', contract_id=contract.id) }}">查看开票</a></td>
+        </tr>
+        <tr>
+            <td>退款记录</td>
+            <td>{{ stats.refund }}</td>
+            <td><a href="{{ url_for('contracts.manage_refunds', contract_id=contract.id) }}">查看退款</a></td>
+        </tr>
+        <tr>
+            <td>客户反馈</td>
+            <td>{{ stats.fb }}</td>
+            <td><a href="{{ url_for('contracts.manage_feedbacks', contract_id=contract.id) }}">查看反馈</a></td>
+        </tr>
+        <tr>
+            <td>文件</td>
+            <td>{{ stats.files }}</td>
+            <td><a href="{{ url_for('contracts.manage_files', contract_id=contract.id) }}">查看文件</a></td>
+        </tr>
+    </tbody>
+</table>
+
+<!-- 部门负责人总览 -->
+<h2>部门及负责人</h2>
+{% if leaders %}
+<table border="1" cellpadding="4" cellspacing="0">
+    <thead>
+        <tr>
+            <th>部门</th>
+            <th>负责人</th>
+            <th>职位</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for l in leaders %}
+        <tr>
+            <td>
+                {% if l.person and l.person.department %}
+                {{ l.person.department.name }}
+                {% elif l.department %}
+                {{ l.department.name }}
+                {% else %}
+                -
+                {% endif %}
+            </td>
+            <td>{{ l.person.name }}</td>
+            <td>{{ l.person.position }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p>当前未配置部门负责人。</p>
+{% endif %}
+
+
+<!-- 销售信息总览 -->
+<h2>销售信息</h2>
+  {% if sales %}
+<p>
+    报价金额：{% if sales.quote_amount is not none %}{{ sales.quote_amount }}{% else %}未填{% endif %}<br>
+    报价日期：{{ sales.quote_date or '未填' }}<br>
+    成交日期：{{ sales.deal_date or '未填' }}<br>
+    销售负责人：{{ sales.sales_person.name if sales.sales_person else '未指定' }}<br>
+    备注：{{ sales.remarks or '' }}
+</p>
+<p>
+    <a href="{{ url_for('contracts.manage_sales', contract_id=contract.id) }}">编辑销售信息</a>
+</p>
+  {% else %}
+<p>尚未填写销售信息。 <a href="{{ url_for('contracts.manage_sales', contract_id=contract.id) }}">立即填写</a></p>
+  {% endif %}
+
+{% endblock %}

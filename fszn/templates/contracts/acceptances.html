@@ -1,0 +1,110 @@
+{% extends 'base.html' %}
+
+{% block title %}验收记录 - {{ contract.project_code }}{% endblock %}
+
+{% block content %}
+<h1>验收记录</h1>
+
+<p>
+    <strong>项目编号：</strong>{{ contract.project_code }}<br>
+    <strong>合同名称：</strong>{{ contract.name }}
+</p>
+
+<!-- 导航 -->
+<p>
+    <a href="{{ url_for('contracts.list_contracts') }}">返回项目列表</a> |
+    <a href="{{ url_for('contracts.manage_leaders', contract_id=contract.id) }}">部门负责人</a> |
+    <a href="{{ url_for('contracts.manage_tasks', contract_id=contract.id) }}">任务/进度</a> |
+    <a href="{{ url_for('contracts.manage_procurements', contract_id=contract.id) }}">采购清单</a> |
+    <a href="{{ url_for('contracts.manage_acceptances', contract_id=contract.id) }}">验收</a> |
+    <a href="{{ url_for('contracts.manage_payments', contract_id=contract.id) }}">付款</a> |
+    <a href="{{ url_for('contracts.manage_invoices', contract_id=contract.id) }}">开票</a> |
+    <a href="{{ url_for('contracts.manage_refunds', contract_id=contract.id) }}">退款</a> |
+    <a href="{{ url_for('contracts.manage_feedbacks', contract_id=contract.id) }}">客户反馈</a>
+    <a href="{{ url_for('contracts.manage_files', contract_id=contract.id) }}">文件</a>
+</p>
+
+<h2>已登记的验收</h2>
+  {% if records %}
+<table border="1" cellpadding="4" cellspacing="0">
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>阶段名称</th>
+            <th>验收负责人</th>
+            <th>日期</th>
+            <th>状态</th>
+            <th>备注</th>
+            <th>操作</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for r in records %}
+        <tr>
+            <td>{{ r.id }}</td>
+            <td>{{ r.stage_name }}</td>
+            <td>{{ r.person.name if r.person else '' }}</td>
+            <td>{{ r.date }}</td>
+            <td>{{ r.status }}</td>
+            <td>{{ r.remarks }}</td>
+            <td>
+                <form method="post"
+                      action="{{ url_for('contracts.delete_acceptance', contract_id=contract.id, acc_id=r.id) }}"
+                      style="display:inline;">
+                    <button type="submit" onclick="return confirm('确认删除该验收记录？');">删除</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+  {% else %}
+<p>当前还没有验收记录。</p>
+  {% endif %}
+
+<h2>新增验收记录</h2>
+<form method="post">
+    <p>
+        <label>
+            阶段名称：
+            <input type="text" name="stage_name" placeholder="如：出厂验收/现场初验/最终验收">
+        </label>
+    </p>
+    <p>
+        <label>
+            验收负责人（可选）：
+            <select name="person_id">
+                <option value="">可不选</option>
+                {% for p in persons %}
+                <option value="{{ p.id }}">{{ p.name }} - {{ p.position }} (ID={{ p.id }})</option>
+                {% endfor %}
+            </select>
+        </label>
+    </p>
+    <p>
+        <label>
+            验收日期：
+            <input type="date" name="date">
+        </label>
+    </p>
+    <p>
+        <label>
+            状态：
+            <select name="status">
+                <option value="进行中">进行中</option>
+                <option value="通过">通过</option>
+                <option value="不通过">不通过</option>
+            </select>
+        </label>
+    </p>
+    <p>
+        <label>
+            备注：
+            <textarea name="remarks" rows="3" cols="50"></textarea>
+        </label>
+    </p>
+    <p>
+        <button type="submit">保存验收记录</button>
+    </p>
+</form>
+{% endblock %}

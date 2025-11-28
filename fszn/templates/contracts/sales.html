@@ -1,0 +1,94 @@
+{% extends 'base.html' %}
+
+{% block title %}销售信息 - {{ contract.project_code }}{% endblock %}
+
+{% block content %}
+<h1>销售信息</h1>
+
+<p>
+    <strong>项目编号：</strong>{{ contract.project_code }}<br>
+    <strong>合同名称：</strong>{{ contract.name }}<br>
+    <strong>客户公司：</strong>{{ contract.company.name if contract.company else '' }}
+</p>
+
+<!-- 顶部导航 -->
+<p>
+    <a href="{{ url_for('contracts.list_contracts') }}">返回项目列表</a> |
+    <a href="{{ url_for('contracts.manage_sales', contract_id=contract.id) }}">销售信息</a> |
+    <a href="{{ url_for('contracts.manage_leaders', contract_id=contract.id) }}">部门负责人</a> |
+    <a href="{{ url_for('contracts.manage_tasks', contract_id=contract.id) }}">任务/进度</a> |
+    <a href="{{ url_for('contracts.manage_procurements', contract_id=contract.id) }}">采购清单</a> |
+    <a href="{{ url_for('contracts.manage_acceptances', contract_id=contract.id) }}">验收</a> |
+    <a href="{{ url_for('contracts.manage_payments', contract_id=contract.id) }}">付款</a> |
+    <a href="{{ url_for('contracts.manage_invoices', contract_id=contract.id) }}">开票</a> |
+    <a href="{{ url_for('contracts.manage_refunds', contract_id=contract.id) }}">退款</a> |
+    <a href="{{ url_for('contracts.manage_feedbacks', contract_id=contract.id) }}">客户反馈</a>
+    <a href="{{ url_for('contracts.manage_files', contract_id=contract.id) }}">文件</a>
+
+</p>
+
+  {% if sales %}
+<h2>当前销售信息</h2>
+<p>
+    报价金额：{% if sales.quote_amount is not none %}{{ sales.quote_amount }}{% else %}未填{% endif %}<br>
+    报价日期：{{ sales.quote_date or '未填' }}<br>
+    成交日期：{{ sales.deal_date or '未填' }}<br>
+    销售负责人：{{ sales.sales_person.name if sales.sales_person else '未指定' }}<br>
+    备注：{{ sales.remarks or '' }}
+</p>
+<form method="post" action="{{ url_for('contracts.delete_sales', contract_id=contract.id) }}">
+    <button type="submit" onclick="return confirm('确认删除该销售信息？');">删除销售信息</button>
+</form>
+<hr>
+  {% endif %}
+
+<h2>{% if sales %}更新{% else %}新增{% endif %}销售信息</h2>
+
+<form method="post">
+    <p>
+        <label>
+            报价金额（元，可空）：
+            <input type="number" step="0.01" name="quote_amount"
+                   value="{% if sales and sales.quote_amount is not none %}{{ sales.quote_amount }}{% endif %}">
+        </label>
+    </p>
+    <p>
+        <label>
+            报价日期（可空）：
+            <input type="date" name="quote_date"
+                   value="{{ sales.quote_date if sales and sales.quote_date else '' }}">
+        </label>
+    </p>
+    <p>
+        <label>
+            成交日期（可空）：
+            <input type="date" name="deal_date"
+                   value="{{ sales.deal_date if sales and sales.deal_date else '' }}">
+        </label>
+    </p>
+    <p>
+        <label>
+            销售负责人（可选）：
+            <select name="sales_person_id">
+                <option value="">未指定</option>
+                {% for p in persons %}
+                <option value="{{ p.id }}"
+                        {% if sales and sales.sales_person and sales.sales_person.id == p.id %}selected{% endif %}>
+                    {{ p.name }} - {{ p.position }} (ID={{ p.id }})
+                </option>
+                {% endfor %}
+            </select>
+        </label>
+    </p>
+    <p>
+        <label>
+            备注：
+            <textarea name="remarks" rows="3" cols="50">{{ sales.remarks if sales and sales.remarks else '' }}</textarea>
+        </label>
+    </p>
+
+    <p>
+        <button type="submit">保存</button>
+    </p>
+</form>
+{% endblock %}

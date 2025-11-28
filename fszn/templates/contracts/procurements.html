@@ -1,0 +1,110 @@
+{% extends 'base.html' %}
+
+{% block title %}采购清单 - {{ contract.project_code }}{% endblock %}
+
+{% block content %}
+<h1>采购清单</h1>
+
+<p>
+    <strong>项目编号：</strong>{{ contract.project_code }}<br>
+    <strong>合同名称：</strong>{{ contract.name }}
+</p>
+
+<!-- 导航 -->
+<p>
+    <a href="{{ url_for('contracts.list_contracts') }}">返回项目列表</a> |
+    <a href="{{ url_for('contracts.manage_leaders', contract_id=contract.id) }}">部门负责人</a> |
+    <a href="{{ url_for('contracts.manage_tasks', contract_id=contract.id) }}">任务/进度</a> |
+    <a href="{{ url_for('contracts.manage_procurements', contract_id=contract.id) }}">采购清单</a> |
+    <a href="{{ url_for('contracts.manage_acceptances', contract_id=contract.id) }}">验收</a> |
+    <a href="{{ url_for('contracts.manage_payments', contract_id=contract.id) }}">付款</a> |
+    <a href="{{ url_for('contracts.manage_invoices', contract_id=contract.id) }}">开票</a> |
+    <a href="{{ url_for('contracts.manage_refunds', contract_id=contract.id) }}">退款</a> |
+    <a href="{{ url_for('contracts.manage_feedbacks', contract_id=contract.id) }}">客户反馈</a>
+    <a href="{{ url_for('contracts.manage_files', contract_id=contract.id) }}">文件</a>
+
+</p>
+
+<h2>当前采购项目</h2>
+  {% if items %}
+<table border="1" cellpadding="4" cellspacing="0">
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>物料名称</th>
+            <th>数量</th>
+            <th>单位</th>
+            <th>预计到货日期</th>
+            <th>状态</th>
+            <th>备注</th>
+            <th>操作</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for it in items %}
+        <tr>
+            <td>{{ it.id }}</td>
+            <td>{{ it.item_name }}</td>
+            <td>{{ it.quantity }}</td>
+            <td>{{ it.unit }}</td>
+            <td>{{ it.expected_date or '' }}</td>
+            <td>{{ it.status }}</td>
+            <td>{{ it.remarks }}</td>
+            <td>
+                <form method="post"
+                      action="{{ url_for('contracts.delete_procurement', contract_id=contract.id, item_id=it.id) }}"
+                      style="display:inline;">
+                    <button type="submit" onclick="return confirm('确认删除该采购项？');">删除</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+  {% else %}
+<p>当前还没有采购项。</p>
+  {% endif %}
+
+<h2>新增采购项</h2>
+<form method="post">
+    <p>
+        <label>
+            物料名称：
+            <input type="text" name="item_name">
+        </label>
+    </p>
+    <p>
+        <label>
+            数量：
+            <input type="number" name="quantity">
+        </label>
+    </p>
+    <p>
+        <label>
+            单位：
+            <input type="text" name="unit">
+        </label>
+    </p>
+    <p>
+        <label>
+            预计到货日期：
+            <input type="date" name="expected_date">
+        </label>
+    </p>
+    <p>
+        <label>
+            状态：
+            <input type="text" name="status" placeholder="如：未采购/已下单/运输中/已到货">
+        </label>
+    </p>
+    <p>
+        <label>
+            备注：
+            <textarea name="remarks" rows="3" cols="50"></textarea>
+        </label>
+    </p>
+    <p>
+        <button type="submit">保存采购项</button>
+    </p>
+</form>
+{% endblock %}

@@ -1,0 +1,90 @@
+{% extends 'base.html' %}
+
+{% block title %}退款记录 - {{ contract.project_code }}{% endblock %}
+
+{% block content %}
+  <h1>退款记录</h1>
+
+  <p>
+    <strong>项目编号：</strong>{{ contract.project_code }}<br>
+    <strong>合同名称：</strong>{{ contract.name }}
+  </p>
+
+  <!-- 导航 -->
+  <p>
+    <a href="{{ url_for('contracts.list_contracts') }}">返回项目列表</a> |
+    <a href="{{ url_for('contracts.manage_leaders', contract_id=contract.id) }}">部门负责人</a> |
+    <a href="{{ url_for('contracts.manage_tasks', contract_id=contract.id) }}">任务/进度</a> |
+    <a href="{{ url_for('contracts.manage_procurements', contract_id=contract.id) }}">采购清单</a> |
+    <a href="{{ url_for('contracts.manage_acceptances', contract_id=contract.id) }}">验收</a> |
+    <a href="{{ url_for('contracts.manage_payments', contract_id=contract.id) }}">付款</a> |
+    <a href="{{ url_for('contracts.manage_invoices', contract_id=contract.id) }}">开票</a> |
+    <a href="{{ url_for('contracts.manage_refunds', contract_id=contract.id) }}">退款</a> |
+    <a href="{{ url_for('contracts.manage_feedbacks', contract_id=contract.id) }}">客户反馈</a>
+    <a href="{{ url_for('contracts.manage_files', contract_id=contract.id) }}">文件</a>
+
+  </p>
+
+  <h2>已登记的退款</h2>
+  {% if records %}
+    <table border="1" cellpadding="4" cellspacing="0">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>金额</th>
+          <th>日期</th>
+          <th>原因</th>
+          <th>备注</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in records %}
+          <tr>
+            <td>{{ r.id }}</td>
+            <td>{{ r.amount }}</td>
+            <td>{{ r.date }}</td>
+            <td>{{ r.reason }}</td>
+            <td>{{ r.remarks }}</td>
+            <td>
+              <form method="post"
+                    action="{{ url_for('contracts.delete_refund', contract_id=contract.id, ref_id=r.id) }}"
+                    style="display:inline;">
+                <button type="submit" onclick="return confirm('确认删除该退款记录？');">删除</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p>当前还没有退款记录。</p>
+  {% endif %}
+
+  <h2>新增退款记录</h2>
+  <form method="post">
+    <p>
+      <label>金额：
+        <input type="number" step="0.01" name="amount">
+      </label>
+    </p>
+    <p>
+      <label>日期：
+        <input type="date" name="date">
+      </label>
+    </p>
+    <p>
+      <label>原因：
+        <input type="text" name="reason">
+      </label>
+    </p>
+    <p>
+      <label>备注：
+        <textarea name="remarks" rows="3" cols="50"></textarea>
+      </label>
+    </p>
+    <p>
+      <button type="submit">保存退款记录</button>
+    </p>
+  </form>
+{% endblock %}

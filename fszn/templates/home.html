@@ -1,0 +1,17 @@
+{% extends 'base.html' %}
+
+{% block title %}主页 - FSZN 合同管理系统{% endblock %}
+
+{% block content %}
+  {% if user %}
+<h1>欢迎，{{ user.username }}！</h1>
+<p>后面我们会在这里放：项目列表 / 合同进度 / 通知等内容。</p>
+  {% else %}
+<h1>欢迎来到 FSZN 合同管理系统</h1>
+<p>
+    <a href="{{ url_for('auth.login') }}">请先登录</a>
+    或
+    <a href="{{ url_for('auth.register') }}">注册一个新账号</a>
+</p>
+  {% endif %}
+{% endblock %}

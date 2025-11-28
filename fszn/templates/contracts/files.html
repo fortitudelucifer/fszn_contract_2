@@ -1,0 +1,149 @@
+{% extends 'base.html' %}
+
+{% block title %}文件管理 - {{ contract.project_code }}{% endblock %}
+
+{% block content %}
+<h1>文件管理</h1>
+
+<p>
+    <strong>项目编号：</strong>{{ contract.project_code }}<br>
+    <strong>合同名称：</strong>{{ contract.name }}<br>
+    <strong>客户公司：</strong>{{ contract.company.name if contract.company else '' }}
+</p>
+
+<!-- 顶部导航 -->
+<p>
+    <a href="{{ url_for('contracts.list_contracts') }}">返回项目列表</a> |
+    <a href="{{ url_for('contracts.manage_sales', contract_id=contract.id) }}">销售信息</a> |
+    <a href="{{ url_for('contracts.manage_leaders', contract_id=contract.id) }}">部门负责人</a> |
+    <a href="{{ url_for('contracts.manage_tasks', contract_id=contract.id) }}">任务/进度</a> |
+    <a href="{{ url_for('contracts.manage_procurements', contract_id=contract.id) }}">采购清单</a> |
+    <a href="{{ url_for('contracts.manage_acceptances', contract_id=contract.id) }}">验收</a> |
+    <a href="{{ url_for('contracts.manage_payments', contract_id=contract.id) }}">付款</a> |
+    <a href="{{ url_for('contracts.manage_invoices', contract_id=contract.id) }}">开票</a> |
+    <a href="{{ url_for('contracts.manage_refunds', contract_id=contract.id) }}">退款</a> |
+    <a href="{{ url_for('contracts.manage_feedbacks', contract_id=contract.id) }}">客户反馈</a> |
+    <a href="{{ url_for('contracts.manage_files', contract_id=contract.id) }}">文件</a>
+</p>
+
+<!-- 操作风险提示 -->
+<div style="border:1px solid #f99; padding:8px; margin-bottom:10px;">
+    <strong>操作风险提示：</strong><br>
+    1. 删除文件后，普通用户将无法再访问该文件，如需恢复只能由管理员在数据库中手工操作，请谨慎删除。<br>
+    2. 上传前请确认文件内容和类型是否正确，避免将错误文件共享给客户或其他部门。<br>
+    3. 大文件会占用较多存储资源，请尽量压缩或拆分上传。<br>
+</div>
+
+<h2>当前文件</h2>
+
+  {% if files %}
+<table border="1" cellpadding="4" cellspacing="0">
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>文件名（生成）</th>
+            <th>原始文件名</th>
+            <th>类型</th>
+            <th>版本</th>
+            <th>作者</th>
+            <th>上传者</th>
+            <th>大小</th>
+            <th>是否公开</th>
+            <th>上传时间</th>
+            <th>操作</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for f in files %}
+        <tr>
+            <td>{{ f.id }}</td>
+            <td>{{ f.stored_filename }}</td>
+            <td>{{ f.original_filename }}</td>
+            <td>
+                {% if f.file_type == 'contract' %}合同
+                {% elif f.file_type == 'tech' %}技术文档
+                {% elif f.file_type == 'drawing' %}图纸
+                {% elif f.file_type == 'invoice' %}发票/财务票据
+                {% elif f.file_type == 'ticket' %}销售票据
+                {% else %}
+                {{ f.file_type }}
+                {% endif %}
+            </td>
+            <td>{{ f.version }}</td>
+            <td>{{ f.author }}</td>
+            <td>{{ f.uploader.username if f.uploader else '' }}</td>
+            <td>{{ human_filesize(f.file_size) }}</td>
+
+            <td>{{ '是' if f.is_public else '否' }}</td>
+            <td>
+                {{ f.created_at.strftime('%Y-%m-%d %H:%M:%S') if f.created_at else '' }}
+            </td>
+
+            <td>
+                <a href="{{ url_for('contracts.download_file', contract_id=contract.id, file_id=f.id) }}">下载</a>
+                |
+                <form method="post"
+                      action="{{ url_for('contracts.delete_file', contract_id=contract.id, file_id=f.id) }}"
+                      style="display:inline;">
+                    <button type="submit"
+                            onclick="return confirm('确认删除该文件？删除后普通用户将无法恢复。');">
+                        删除
+                    </button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+  {% else %}
+<p>当前该项目还没有文件。</p>
+  {% endif %}
+
+<h2>上传新文件</h2>
+
+<!-- 上传提示：命名规则 & 大小限制 -->
+<div style="border:1px solid #99c; padding:8px; margin-bottom:10px;">
+    <strong>命名与上传提示：</strong><br>
+    1. 系统会自动根据以下规则生成文件名：<br>
+    <code>客户公司_项目编号_合同编号_合同名称_上传日期_文件类型_版本号_作者.扩展名</code><br>
+    2. 你只需要选择文件、选择文件类型、填写版本号（可选），作者将自动使用当前登录用户名。<br>
+    3. 建议尽量上传 PDF 或常见图片格式（PNG/JPG），单个文件大小不超过 {{ (config.MAX_CONTENT_LENGTH or 0) // (1024*1024) }} MB。<br>
+</div>
+
+<form method="post" enctype="multipart/form-data">
+    <p>
+        <label>
+            文件：
+            <input type="file" name="file">
+        </label>
+    </p>
+    <p>
+        <label>
+            文件类型：
+            <select name="file_type">
+                <option value="contract">合同</option>
+                <option value="tech">技术文档</option>
+                <option value="drawing">图纸</option>
+                <option value="invoice">发票/财务票据</option>
+                <option value="ticket">销售票据</option>
+            </select>
+        </label>
+    </p>
+    <p>
+        <label>
+            版本号：
+            <input type="text" name="version" placeholder="例如：V1 或 1.0">
+        </label>
+    </p>
+    <p>
+        <label>
+            <input type="checkbox" name="is_public" value="y">
+            公开给客户下载（仅对合同和技术文档生效）
+        </label>
+    </p>
+    <p>
+        <button type="submit">上传</button>
+    </p>
+</form>
+
+{% endblock %}

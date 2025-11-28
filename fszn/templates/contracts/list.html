@@ -1,0 +1,114 @@
+{% extends 'base.html' %}
+
+{% block title %}项目 / 合同列表{% endblock %}
+
+{% block content %}
+<h1>项目 / 合同列表</h1>
+
+<p>
+    <a href="{{ url_for('contracts.new_contract') }}">新建项目/合同</a>
+</p>
+
+  {% if contracts %}
+<table border="1" cellpadding="4" cellspacing="0">
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>客户公司</th>
+            <th>项目编号</th>
+            <th>合同编号</th>
+            <th>合同名称</th>
+            <th>客户负责人</th>
+            <th>客户联系方式</th>
+            <th>我方负责人</th>
+            <th>状态</th>
+            <th>部门及负责人</th>
+            <th>销售概要</th>
+            <th>操作</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for c in contracts %}
+        <tr>
+            <td>{{ c.id }}</td>
+            <td>{{ c.company.name if c.company else '' }}</td>
+            <td>{{ c.project_code }}</td>
+            <td>{{ c.contract_number }}</td>
+            <td>
+                <a href="{{ url_for('contracts.manage_tasks', contract_id=c.id) }}">
+                    {{ c.name }}
+                </a>
+            </td>
+            <td>{{ c.client_manager }}</td>
+            <td>{{ c.client_contact }}</td>
+            <td>{{ c.our_manager }}</td>
+            {# ========= 彩色状态展示 ========= #}
+            <td>
+                {% set st = statuses.get(c.id) %}
+                {% if st %}
+                {% if st.level == 'green' %}
+                <span style="color:green;">{{ st.text }}</span>
+                {% elif st.level == 'red' %}
+                <span style="color:red;">{{ st.text }}</span>
+                {% elif st.level == 'orange' %}
+                <span style="color:darkorange;">{{ st.text }}</span>
+                {% elif st.level == 'blue' %}
+                <span style="color:blue;">{{ st.text }}</span>
+                {% else %}
+                <span style="color:#666;">{{ st.text }}</span>
+                {% endif %}
+                {% else %}
+                -
+                {% endif %}
+            </td>
+
+            {# ========= 部门及负责人 ========= #}
+            <td>
+                {% set dept_map = leaders_by_contract.get(c.id, {}) %}
+                {% if dept_map %}
+                {% for dept, persons in dept_map.items() %}
+                <div>
+                    <strong>{{ dept }}：</strong>
+                    {% for p in persons %}
+                    {{ p.name }}{% if not loop.last %}，{% endif %}
+                    {% endfor %}
+                </div>
+                {% endfor %}
+                {% else %}
+                暂无
+                {% endif %}
+            </td>
+
+            {# 销售信息概要 #}
+            <td>
+                {% if c.sales_info %}
+                报价：{{ c.sales_info.quote_amount or '未填' }}<br>
+                报价日：{{ c.sales_info.quote_date or '未填' }}<br>
+                成交日：{{ c.sales_info.deal_date or '未填' }}<br>
+                销售：{{ c.sales_info.sales_person.name if c.sales_info.sales_person else '未指定' }}
+                {% else %}
+                暂无
+                {% endif %}
+            </td>
+            <td>
+                <a href="{{ url_for('contracts.contract_overview', contract_id=c.id) }}">总览</a> |
+                <a href="{{ url_for('contracts.manage_sales', contract_id=c.id) }}">销售</a> |
+                <a href="{{ url_for('contracts.manage_leaders', contract_id=c.id) }}">负责人</a> |
+                <a href="{{ url_for('contracts.manage_tasks', contract_id=c.id) }}">任务</a> |
+                <a href="{{ url_for('contracts.manage_procurements', contract_id=c.id) }}">采购</a> |
+                <a href="{{ url_for('contracts.manage_acceptances', contract_id=c.id) }}">验收</a> |
+                <a href="{{ url_for('contracts.manage_payments', contract_id=c.id) }}">付款</a> |
+                <a href="{{ url_for('contracts.manage_invoices', contract_id=c.id) }}">开票</a> |
+                <a href="{{ url_for('contracts.manage_refunds', contract_id=c.id) }}">退款</a> |
+                <a href="{{ url_for('contracts.manage_feedbacks', contract_id=c.id) }}">客户反馈</a> |
+                <a href="{{ url_for('contracts.manage_files', contract_id=c.id) }}">文件</a>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+
+</table>
+  {% else %}
+<p>当前还没有项目/合同。</p>
+  {% endif %}
+{% endblock %}

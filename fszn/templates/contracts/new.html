@@ -1,0 +1,57 @@
+{% extends 'base.html' %}
+
+{% block title %}新建项目/合同{% endblock %}
+
+{% block content %}
+<h1>新建项目/合同</h1>
+
+<form method="post">
+    <p>
+        <label>
+            客户公司名称：
+            <input type="text" name="company_name">
+        </label>
+    </p>
+    <p>
+        <label>
+            项目编号：
+            <input type="text" name="project_code">
+        </label>
+    </p>
+    <p>
+        <label>
+            合同编号：
+            <input type="text" name="contract_number">
+        </label>
+    </p>
+    <p>
+        <label>
+            合同名称：
+            <input type="text" name="name">
+        </label>
+    </p>
+    <p>
+        <label>
+            客户公司负责人：
+            <input type="text" name="client_manager">
+        </label>
+    </p>
+    <p>
+        <label>
+            客户联系方式：
+            <input type="text" name="client_contact">
+        </label>
+    </p>
+    <p>
+        <label>
+            我方公司负责人：
+            <input type="text" name="our_manager">
+        </label>
+    </p>
+
+    <p>
+        <button type="submit">保存</button>
+        <a href="{{ url_for('contracts.list_contracts') }}">取消</a>
+    </p>
+</form>
+{% endblock %}

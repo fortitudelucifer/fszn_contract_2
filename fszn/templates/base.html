@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <title>{% block title %}FSZN 合同管理系统{% endblock %}</title>
+</head>
+<body>
+    <nav>
+        <a href="{{ url_for('home') }}">主页</a>
+        {% if session.get('user_id') %}
+        <a href="{{ url_for('contracts.list_contracts') }}">项目/合同</a>
+        <a href="{{ url_for('org.list_departments') }}">部门与人员</a>
+        <a href="{{ url_for('auth.logout') }}">退出登录</a>
+        {% else %}
+        <a href="{{ url_for('auth.login') }}">登录</a>
+        <a href="{{ url_for('auth.register') }}">注册</a>
+        {% endif %}
+    </nav>
+    <hr>
+
+
+
+    {% with messages = get_flashed_messages() %}
+    {% if messages %}
+    <ul>
+        {% for msg in messages %}
+        <li>{{ msg }}</li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+</body>
+</html>
+
