@@ -13,6 +13,64 @@
     <strong>我方负责人：</strong>{{ contract.our_manager or '' }}<br>
 </p>
 
+<p>
+    <strong>当前状态：</strong>{{ status_text }}（级别：{{ status_level }}）
+</p>
+
+{% if finance is defined %}
+<h2>财务总览</h2>
+<table border="1" cellpadding="4" cellspacing="0">
+    <tbody>
+        <tr>
+            <td>报价金额</td>
+            <td>
+                {% if finance.quote_amount is not none %}
+                {{ finance.quote_amount }}
+                {% else %}
+                未填写
+                {% endif %}
+            </td>
+        </tr>
+        <tr>
+            <td>已收款总额</td>
+            <td>{{ finance.paid_total }}</td>
+        </tr>
+        <tr>
+            <td>退款总额</td>
+            <td>{{ finance.refund_total }}</td>
+        </tr>
+        <tr>
+            <td>实收净额（收款-退款）</td>
+            <td>{{ finance.net_received }}</td>
+        </tr>
+        <tr>
+            <td>已开票总额</td>
+            <td>{{ finance.invoiced_total }}</td>
+        </tr>
+        <tr>
+            <td>剩余应收</td>
+            <td>
+                {% if finance.receivable_remaining is not none %}
+                {{ finance.receivable_remaining }}
+                {% else %}
+                -
+                {% endif %}
+            </td>
+        </tr>
+        <tr>
+            <td>剩余待开票</td>
+            <td>
+                {% if finance.invoice_remaining is not none %}
+                {{ finance.invoice_remaining }}
+                {% else %}
+                -
+                {% endif %}
+            </td>
+        </tr>
+    </tbody>
+</table>
+{% endif %}
+
 <!-- 顶部导航 -->
 <p>
     <a href="{{ url_for('contracts.list_contracts') }}">返回项目列表</a> |

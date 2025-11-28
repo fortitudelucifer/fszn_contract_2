@@ -128,6 +128,8 @@ class ProcurementItem(db.Model):
     id = db.Column(db.Integer, primary_key=True)
 
     contract_id = db.Column(db.Integer, db.ForeignKey('contracts.id'), nullable=False)
+    # ：负责人（可为空）
+    person_id = db.Column(db.Integer, db.ForeignKey('persons.id'), nullable=True)
 
     item_name = db.Column(db.String(200), nullable=False)          # 物料名称
     quantity = db.Column(db.Integer, nullable=False, default=0)    # 数量
@@ -137,6 +139,9 @@ class ProcurementItem(db.Model):
     remarks = db.Column(db.String(500))                            # 备注
 
     contract = db.relationship('Contract', backref='procurement_items')
+    # ：负责人关系
+    person = db.relationship('Person', backref='procurement_items')
+
 
 
 class Acceptance(db.Model):

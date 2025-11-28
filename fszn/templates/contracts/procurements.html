@@ -36,6 +36,7 @@
             <th>单位</th>
             <th>预计到货日期</th>
             <th>状态</th>
+            <th>负责人</th>  <!-- 🔹 新增 -->
             <th>备注</th>
             <th>操作</th>
         </tr>
@@ -49,6 +50,7 @@
             <td>{{ it.unit }}</td>
             <td>{{ it.expected_date or '' }}</td>
             <td>{{ it.status }}</td>
+            <td>{{ it.person.name if it.person else '' }}</td>  <!-- 🔹 新增 -->
             <td>{{ it.remarks }}</td>
             <td>
                 <form method="post"
@@ -95,6 +97,17 @@
         <label>
             状态：
             <input type="text" name="status" placeholder="如：未采购/已下单/运输中/已到货">
+        </label>
+    </p>
+    <p>
+        <label>
+            负责人：
+            <select name="person_id">
+                <option value="">未指定</option>
+                {% for p in persons %}
+                <option value="{{ p.id }}">{{ p.name }} - {{ p.position }} (ID={{ p.id }})</option>
+                {% endfor %}
+            </select>
         </label>
     </p>
     <p>

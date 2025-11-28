@@ -5,11 +5,58 @@
 {% block content %}
 <h1>项目 / 合同列表</h1>
 
+<form method="get" style="margin: 0 0 1em 0;">
+    <div style="margin-bottom: 0.5em;">
+        客户公司：
+        <input type="text" name="company" value="{{ company_kw or '' }}" style="width: 120px;">
+
+        项目编号：
+        <input type="text" name="project" value="{{ project_kw or '' }}" style="width: 120px;">
+
+        合同编号：
+        <input type="text" name="contract_no" value="{{ contract_no_kw or '' }}" style="width: 120px;">
+    </div>
+
+    <div style="margin-bottom: 0.5em;">
+        销售：
+        <input type="text" name="sales" value="{{ sales_kw or '' }}" style="width: 100px;">
+
+        部门负责人：
+        <input type="text" name="leader" value="{{ leader_kw or '' }}" style="width: 100px;">
+
+        状态：
+        <select name="status">
+            <option value="">全部</option>
+            <option value="not_started" {{ 'selected' if status_param == 'not_started' }}>未启动</option>
+            <option value="in_production" {{ 'selected' if status_param == 'in_production' }}>生产中</option>
+            <option value="accepted_pending_payment" {{ 'selected' if status_param == 'accepted_pending_payment' }}>已验收，待回款</option>
+            <option value="paid_with_issues" {{ 'selected' if status_param == 'paid_with_issues' }}>已回款，有未解决问题</option>
+            <option value="finished" {{ 'selected' if status_param == 'finished' }}>已完成</option>
+        </select>
+    </div>
+
+    <div style="margin-bottom: 0.5em;">
+        排序：
+        <select name="order">
+            <option value="" {{ 'selected' if not order_param }}>按创建时间（新→旧）</option>
+            <option value="created_at_asc" {{ 'selected' if order_param == 'created_at_asc' }}>按创建时间（旧→新）</option>
+            <option value="deal_date_desc" {{ 'selected' if order_param == 'deal_date_desc' }}>按成交日期（新→旧）</option>
+            <option value="deal_date_asc" {{ 'selected' if order_param == 'deal_date_asc' }}>按成交日期（旧→新）</option>
+            <option value="status_asc" {{ 'selected' if order_param == 'status_asc' }}>按状态（A→Z）</option>
+            <option value="status_desc" {{ 'selected' if order_param == 'status_desc' }}>按状态（Z→A）</option>
+        </select>
+
+        <button type="submit">搜索 / 筛选</button>
+        <a href="{{ url_for('contracts.list_contracts') }}">重置</a>
+    </div>
+</form>
+
 <p>
     <a href="{{ url_for('contracts.new_contract') }}">新建项目/合同</a>
 </p>
 
-  {% if contracts %}
+{% if contracts %}
+
 <table border="1" cellpadding="4" cellspacing="0">
     <thead>
         <tr>

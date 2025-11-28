@@ -3,6 +3,7 @@
 from functools import wraps
 from datetime import datetime, date
 import os
+from decimal import Decimal
 
 from flask import (
     Blueprint, render_template, request,
@@ -56,6 +57,14 @@ def get_contract_status(contract: Contract):
     # 兜底
     return "进行中", "blue"
 
+# 状态筛选用的映射：URL 参数值 -> 状态文本
+STATUS_FILTERS = {
+    'not_started': '未启动',
+    'in_production': '生产中',
+    'accepted_pending_payment': '已验收，待回款',
+    'paid_with_issues': '已回款，有未解决问题',
+    'finished': '已完成',
+}
 
 
 
@@ -171,16 +180,94 @@ def list_contracts():
     if user_id:
         user = User.query.get(user_id)
 
-    # 按创建时间倒序，最近的项目在前
-    contracts = Contract.query.order_by(Contract.created_at.desc()).all()
+    # 读取查询参数（全部为可选）
+    company_kw = (request.args.get('company') or '').strip()
+    project_kw = (request.args.get('project') or '').strip()
+    contract_no_kw = (request.args.get('contract_no') or '').strip()
+    sales_kw = (request.args.get('sales') or '').strip()
+    leader_kw = (request.args.get('leader') or '').strip()
+    status_param = (request.args.get('status') or '').strip()
+
+     # 取值约定：
+    #   '' 或 None              -> 按创建时间(新→旧)
+    #   'created_at_asc'        -> 按创建时间(旧→新)
+    #   'deal_date_desc'        -> 按成交日期(新→旧)
+    #   'deal_date_asc'         -> 按成交日期(旧→新)
+    #   'status_asc' / 'status_desc' -> 按状态文本排序（Python 层）
+    order_param = (request.args.get('order') or '').strip()
+
+    # 基础查询
+    query = Contract.query
+
+    if company_kw:
+        query = query.join(Company).filter(Company.name.ilike(f"%{company_kw}%"))
+
+    if project_kw:
+        query = query.filter(Contract.project_code.ilike(f"%{project_kw}%"))
+
+    if contract_no_kw:
+        query = query.filter(Contract.contract_number.ilike(f"%{contract_no_kw}%"))
+
+    if sales_kw:
+        # 只在需要时关联销售信息和销售负责人
+        query = (
+            query.join(SalesInfo, SalesInfo.contract_id == Contract.id)
+                 .join(Person, Person.id == SalesInfo.sales_person_id)
+                 .filter(Person.name.ilike(f"%{sales_kw}%"))
+        )
+
+    if leader_kw:
+        # 只在需要时关联部门负责人
+        query = (
+            query.join(ProjectDepartmentLeader, ProjectDepartmentLeader.contract_id == Contract.id)
+                 .join(Person, Person.id == ProjectDepartmentLeader.person_id)
+                 .filter(Person.name.ilike(f"%{leader_kw}%"))
+        )
+
+    # 根据排序参数设置数据库层排序（创建时间 / 成交日期）
+    # 说明：
+    # - created_at：在 Contract 表上直接排序
+    # - deal_date：需要关联 SalesInfo
+    if order_param in ('deal_date_asc', 'deal_date_desc'):
+        # 如果前面没有按销售人员过滤，这里补一个外连接
+        if not sales_kw:
+            query = query.outerjoin(SalesInfo, SalesInfo.contract_id == Contract.id)
+
+        if order_param == 'deal_date_asc':
+            query = query.order_by(SalesInfo.deal_date.asc(), Contract.created_at.desc())
+        else:
+            # 默认成交日期(新→旧)
+            query = query.order_by(SalesInfo.deal_date.desc(), Contract.created_at.desc())
+    else:
+        # 默认按创建时间排序
+        if order_param == 'created_at_asc':
+            query = query.order_by(Contract.created_at.asc())
+        else:
+            # 创建时间(新→旧)
+            query = query.order_by(Contract.created_at.desc())
+
+    contracts = query.all()
+
+
+    # 去重（避免因 join 产生重复）
+    unique_contracts = []
+    seen_ids = set()
+    for c in contracts:
+        if c.id in seen_ids:
+            continue
+        seen_ids.add(c.id)
+        unique_contracts.append(c)
+    contracts = unique_contracts
 
     # 1）构造：每个合同的 “部门 -> [负责人列表]”
     leaders_by_contract = {}
-
     for c in contracts:
         dept_map = {}
         # 这里用 department_id / person_id 排序，遵守“用 id 控制顺序”的原则
-        for l in sorted(c.department_leaders, key=lambda x: ((x.department_id or 0), (x.person_id or 0))):
+        for l in sorted(
+            c.department_leaders,
+            key=lambda x: ((x.department_id or 0), (x.person_id or 0))
+        ):
             if not l.department or not l.person:
                 continue
             dept_name = l.department.name
@@ -190,8 +277,35 @@ def list_contracts():
     # 2）为每个合同计算状态（get_contract_status）
     status_map = {}
     for c in contracts:
-        status_text, status_level = get_contract_status(c)
-        status_map[c.id] = dict(text=status_text, level=status_level)
+        st_text, st_level = get_contract_status(c)
+        status_map[c.id] = dict(text=st_text, level=st_level)
+
+    # 3）按状态参数进行二次过滤（在 Python 层处理）
+    status_filter_text = STATUS_FILTERS.get(status_param) if status_param else None
+    if status_filter_text:
+        filtered_contracts = []
+        filtered_status_map = {}
+        for c in contracts:
+            st = status_map.get(c.id)
+            if not st:
+                continue
+            if st['text'] == status_filter_text:
+                filtered_contracts.append(c)
+                filtered_status_map[c.id] = st
+        contracts = filtered_contracts
+        status_map = filtered_status_map
+
+    # 4）按状态文本排序（在 Python 层处理）
+    if order_param in ('status_asc', 'status_desc'):
+        reverse = (order_param == 'status_desc')
+
+        def status_key(c: Contract):
+            st = status_map.get(c.id)
+            # 没状态的排在最后
+            return st['text'] if st and st.get('text') else 'ZZZZZZ'
+
+        contracts = sorted(contracts, key=status_key, reverse=reverse)
+
 
     return render_template(
         'contracts/list.html',
@@ -199,7 +313,17 @@ def list_contracts():
         contracts=contracts,
         leaders_by_contract=leaders_by_contract,
         statuses=status_map,
+        # 把当前查询参数传过去，方便模板回填
+        company_kw=company_kw,
+        project_kw=project_kw,
+        contract_no_kw=contract_no_kw,
+        sales_kw=sales_kw,
+        leader_kw=leader_kw,
+        status_param=status_param,
+        order_param=order_param,
     )
+    )
+
 
 
 # 新建项目/合同
@@ -445,6 +569,8 @@ def manage_procurements(contract_id):
         unit = (request.form.get('unit') or '').strip()
         expected_date_str = (request.form.get('expected_date') or '').strip()
         status = (request.form.get('status') or '').strip() or '未采购'
+        # 🔹 ：负责人 ID
+        person_id_raw = (request.form.get('person_id') or '').strip()
         remarks = (request.form.get('remarks') or '').strip()
 
         if not item_name:
@@ -458,6 +584,14 @@ def manage_procurements(contract_id):
 
         expected_date = parse_date(expected_date_str)
 
+        # 🔹 ：解析负责人 ID
+        person_id = None
+        if person_id_raw:
+            try:
+                person_id = int(person_id_raw)
+            except ValueError:
+                person_id = None
+
         item = ProcurementItem(
             contract_id=contract.id,
             item_name=item_name,
@@ -466,6 +600,7 @@ def manage_procurements(contract_id):
             expected_date=expected_date,
             status=status,
             remarks=remarks,
+            person_id=person_id,  # 🔹 新增
         )
         db.session.add(item)
         db.session.commit()
@@ -476,11 +611,15 @@ def manage_procurements(contract_id):
         ProcurementItem.id.asc()
     ).all()
 
+    # 🔹 仿照任务/验收：查询所有人员
+    persons = Person.query.order_by(Person.id.asc()).all()
+
     return render_template(
         'contracts/procurements.html',
         user=user,
         contract=contract,
         items=items,
+        persons=persons,  # 🔹 关键：把 persons 传给模板
     )
 
 
@@ -695,6 +834,42 @@ def contract_overview(contract_id):
     fb_count = Feedback.query.filter_by(contract_id=contract.id).count()
     files_count = ProjectFile.query.filter_by(contract_id=contract.id, is_deleted=False).count()
 
+    # 当前项目状态（文本 + 颜色级别）
+    status_text, status_level = get_contract_status(contract)
+
+    #  财务汇总
+    zero = Decimal('0.00')
+
+    # 报价金额（作为合同金额使用）
+    quote_amount = None
+    if sales and getattr(sales, 'quote_amount', None) is not None:
+        quote_amount = sales.quote_amount
+
+    # 已收款总额 / 退款总额 / 实收净额
+    paid_total = sum((p.amount or zero) for p in contract.payments)
+    refund_total = sum((r.amount or zero) for r in contract.refunds)
+    net_received = paid_total - refund_total
+
+    # 已开票总额
+    invoiced_total = sum((inv.amount or zero) for inv in contract.invoices)
+
+    # 剩余应收 / 剩余待开票
+    receivable_remaining = None
+    invoice_remaining = None
+    if quote_amount is not None:
+        receivable_remaining = quote_amount - net_received
+        invoice_remaining = quote_amount - invoiced_total
+
+    finance = dict(
+        quote_amount=quote_amount,
+        paid_total=paid_total,
+        refund_total=refund_total,
+        net_received=net_received,
+        invoiced_total=invoiced_total,
+        receivable_remaining=receivable_remaining,
+        invoice_remaining=invoice_remaining,
+    )
+
     return render_template(
         'contracts/overview.html',
         user=user,
@@ -713,7 +888,9 @@ def contract_overview(contract_id):
         ),
         status_text=status_text,
         status_level=status_level,
+        finance=finance,  # 传进模板
     )
+
 
 
 
