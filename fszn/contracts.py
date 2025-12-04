@@ -1032,14 +1032,16 @@ def manage_acceptances(contract_id):
         log_operation(
             user=user,
             action='acceptance.create',
-            target_type='Acceptance',
-            target_id=acc.id,
+            target_type='Contract',      # 一样挂在合同下面
+            target_id=contract.id,
             message=f"新增验收记录：{stage_name}",
             extra={
                 "contract_id": contract.id,
                 "date": d.isoformat() if d else None,
                 "status": status,
                 "person_id": person_id,
+                "stage_name": stage_name,
+                "status": status,
             },
         )
 

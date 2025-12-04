@@ -26,7 +26,7 @@
 </p>
 
 <h2>反馈列表</h2>
-  {% if records %}
+  {% if feedbacks %}
 <table border="1" cellpadding="4" cellspacing="0">
     <thead>
         <tr>
@@ -41,7 +41,7 @@
         </tr>
     </thead>
     <tbody>
-        {% for r in records %}
+        {% for r in feedbacks %}
         <tr>
             <td>{{ r.id }}</td>
             <td>{{ r.feedback_time.strftime('%Y-%m-%d %H:%M:%S') if r.feedback_time else ''  }}</td>
