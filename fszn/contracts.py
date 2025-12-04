@@ -1063,28 +1063,41 @@ def manage_acceptances(contract_id):
     )
 
 
+# 删除验收记录
+
 @contracts_bp.route('/<int:contract_id>/acceptances/<int:acc_id>/delete', methods=['POST'])
 @login_required
 def delete_acceptance(contract_id, acc_id):
+    """删除某条验收记录 + 写操作日志"""
+    # 当前用户
+    user_id = session.get('user_id')
+    user = User.query.get(user_id) if user_id else None
+
     contract = Contract.query.get_or_404(contract_id)
     acc = Acceptance.query.filter_by(id=acc_id, contract_id=contract.id).first_or_404()
-    log_operation(
-        user=user,
-        action='acceptance.delete',
-        target_type='Acceptance',
-        target_id=acc.id,
-        message=f"删除验收记录：{acc.stage_name}",
-        extra={
-            "contract_id": contract.id,
-            "date": acc.date.isoformat() if acc.date else None,
-            "status": acc.status,
-        },
-    )
+
+    # 🔹 写操作日志（注意 target_type='Contract'，这样会出现在“当前合同”的日志页面里）
+    if user:
+        log_operation(
+            user=user,
+            action='acceptance.delete',
+            target_type='Contract',          # 关键：写在合同下面
+            target_id=contract.id,
+            message=f"删除验收记录：{acc.stage_name or ''}",
+            extra={
+                "acceptance_id": acc.id,
+                "stage_name": acc.stage_name,
+                "date": acc.date.isoformat() if acc.date else None,
+                "status": acc.status,
+            },
+        )
 
     db.session.delete(acc)
     db.session.commit()
     flash('验收记录已删除')
     return redirect(url_for('contracts.manage_acceptances', contract_id=contract.id))
+
+
 
 # 销售管理
 
@@ -1519,7 +1532,7 @@ def delete_invoice(contract_id, inv_id):
 @contracts_bp.route('/<int:contract_id>/refunds', methods=['GET', 'POST'])
 @login_required
 def manage_refunds(contract_id):
-    """管理某个项目的退款记录"""
+    """退款记录列表 + 新增 + 写审计日志"""
     user_id = session.get('user_id')
     user = User.query.get(user_id) if user_id else None
 
@@ -1546,34 +1559,39 @@ def manage_refunds(contract_id):
             flash('日期格式错误')
             return redirect(url_for('contracts.manage_refunds', contract_id=contract.id))
 
-        r = Refund(
+        refund = Refund(
             contract_id=contract.id,
             amount=amount,
             date=d,
-            reason=reason,
-            remarks=remarks,
+            reason=reason or None,
+            remarks=remarks or None,
         )
-        db.session.add(r)
-        db.session.flush()
+        db.session.add(refund)
+        db.session.flush()  # 先拿到 refund.id
 
-        # 写入操作日志
-        log_operation(
-            user=user,
-            action='refund.create',
-            target_type='Refund',
-            target_id=r.id,
-            message=f"新增退款记录：金额={amount}",
-            extra={
-                "contract_id": contract.id,
-                "date": d.isoformat() if d else None,
-                "method": method,
-            },
-        )
+        # 写操作日志
+        if user:
+            log_operation(
+                user=user,
+                action='refund.create',
+                target_type='Contract',
+                target_id=contract.id,
+                message=f"新增退款：金额={amount}，日期={d.strftime('%Y-%m-%d')}",
+                extra={
+                    "contract_id": contract.id,
+                    "project_code": contract.project_code,
+                    "contract_number": contract.contract_number,
+                    "amount": amount,
+                    "date": d.isoformat(),
+                    "reason": refund.reason,
+                },
+            )
 
         db.session.commit()
         flash('退款记录已添加')
         return redirect(url_for('contracts.manage_refunds', contract_id=contract.id))
 
+    # GET：列表
     records = Refund.query.filter_by(contract_id=contract.id).order_by(
         Refund.date.asc(), Refund.id.asc()
     ).all()
@@ -1585,22 +1603,46 @@ def manage_refunds(contract_id):
         records=records,
     )
 
+# 
 
-@contracts_bp.route('/<int:contract_id>/refunds/<int:ref_id>/delete', methods=['POST'])
+@contracts_bp.route('/<int:contract_id>/refunds/<int:refund_id>/delete', methods=['POST'])
 @login_required
-def delete_refund(contract_id, ref_id):
+def delete_refund(contract_id, refund_id):
+    """删除退款记录 + 写操作日志"""
+    user_id = session.get('user_id')
+    user = User.query.get(user_id) if user_id else None
+
     contract = Contract.query.get_or_404(contract_id)
-    r = Refund.query.filter_by(id=ref_id, contract_id=contract.id).first_or_404()
-    db.session.delete(r)
+    refund = Refund.query.filter_by(id=refund_id, contract_id=contract.id).first_or_404()
+
+    # 🔹 写日志，挂在合同下面
+    if user:
+        log_operation(
+            user=user,
+            action='refund.delete',
+            target_type='Contract',
+            target_id=contract.id,
+            message=f"删除退款记录：金额={float(refund.amount) if refund.amount is not None else None}",
+            extra={
+                "refund_id": refund.id,
+                "amount": float(refund.amount) if refund.amount is not None else None,
+                "date": refund.date.isoformat() if refund.date else None,
+                "reason": refund.reason,
+            },
+        )
+
+    db.session.delete(refund)
     db.session.commit()
     flash('退款记录已删除')
     return redirect(url_for('contracts.manage_refunds', contract_id=contract.id))
+
+
 
 # 客户反馈
 @contracts_bp.route('/<int:contract_id>/feedbacks', methods=['GET', 'POST'])
 @login_required
 def manage_feedbacks(contract_id):
-    """管理某个项目的客户反馈及处理情况"""
+    """客户反馈列表 + 新增 + 写审计日志"""
     user_id = session.get('user_id')
     user = User.query.get(user_id) if user_id else None
 
@@ -1610,78 +1652,93 @@ def manage_feedbacks(contract_id):
         content = (request.form.get('content') or '').strip()
         handler_id_raw = (request.form.get('handler_id') or '').strip()
         result = (request.form.get('result') or '').strip()
-        completion_date_str = (request.form.get('completion_date') or '').strip()
 
         if not content:
-            flash('反馈内容为必填')
+            flash('反馈内容不能为空')
             return redirect(url_for('contracts.manage_feedbacks', contract_id=contract.id))
 
-        handler_id = None
-        if handler_id_raw:
-            try:
-                handler_id = int(handler_id_raw)
-            except ValueError:
-                handler_id = None
+        handler_id = int(handler_id_raw) if handler_id_raw else None
+        handler = Person.query.get(handler_id) if handler_id else None
 
-        completion_time = None
-        if completion_date_str:
-            d = parse_date(completion_date_str)
-            if d:
-                completion_time = datetime.combine(d, datetime.min.time())
-
-        fb = Feedback(
+        feedback = Feedback(
             contract_id=contract.id,
             content=content,
-            handler_id=handler_id,
+            handler_id=handler.id if handler else None,
             result=result or None,
-            completion_time=completion_time,
         )
-        db.session.add(fb)
+        db.session.add(feedback)
         db.session.flush()
 
-        # 写入操作日志
-        log_operation(
-            user=user,
-            action='feedback.create',
-            target_type='Feedback',
-            target_id=fb.id,
-            message="新增客户反馈",
-            extra={
-                "contract_id": contract.id,
-                "handler_id": handler_id,
-                "has_result": bool(result),
-                "completion_time": completion_time.isoformat() if completion_time else None,
-            },
-        )
+        if user:
+            log_operation(
+                user=user,
+                action='feedback.create',
+                target_type='Contract',
+                target_id=contract.id,
+                message="新增客户反馈",
+                extra={
+                    "contract_id": contract.id,
+                    "project_code": contract.project_code,
+                    "contract_number": contract.contract_number,
+                    "handler": handler.name if handler else None,
+                    "is_resolved": feedback.is_resolved,
+                },
+            )
 
         db.session.commit()
-        flash('反馈记录已添加')
+        flash('反馈已添加')
         return redirect(url_for('contracts.manage_feedbacks', contract_id=contract.id))
 
-    records = Feedback.query.filter_by(contract_id=contract.id).order_by(
-        Feedback.feedback_time.asc(), Feedback.id.asc()
+    persons = Person.query.order_by(Person.name.asc()).all()
+    feedbacks = Feedback.query.filter_by(contract_id=contract.id).order_by(
+        Feedback.feedback_time.desc(), Feedback.id.desc()
     ).all()
-    persons = Person.query.order_by(Person.id.asc()).all()
 
     return render_template(
         'contracts/feedbacks.html',
         user=user,
         contract=contract,
-        records=records,
         persons=persons,
-       # feedbacks=feedbacks,
+        feedbacks=feedbacks,
     )
 
 
 @contracts_bp.route('/<int:contract_id>/feedbacks/<int:feedback_id>/delete', methods=['POST'])
 @login_required
 def delete_feedback(contract_id, feedback_id):
+    """删除反馈记录 + 写审计日志"""
+    user_id = session.get('user_id')
+    user = User.query.get(user_id) if user_id else None
+
     contract = Contract.query.get_or_404(contract_id)
-    fb = Feedback.query.filter_by(id=feedback_id, contract_id=contract.id).first_or_404()
+    fb = Feedback.query.filter_by(
+        id=feedback_id,
+        contract_id=contract.id
+    ).first_or_404()
+
+    handler_name = fb.handler.name if fb.handler else None
+
+    if user:
+        log_operation(
+            user=user,
+            action='feedback.delete',
+            target_type='Contract',
+            target_id=contract.id,
+            message='删除客户反馈',
+            extra={
+                "contract_id": contract.id,
+                "project_code": contract.project_code,
+                "contract_number": contract.contract_number,
+                "handler": handler_name,
+                "is_resolved": fb.is_resolved,
+            },
+        )
+
     db.session.delete(fb)
     db.session.commit()
-    flash('反馈记录已删除')
+    flash('反馈已删除')
     return redirect(url_for('contracts.manage_feedbacks', contract_id=contract.id))
+
 
 # 标记反馈为已解决 / 未解决
 

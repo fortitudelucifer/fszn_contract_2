@@ -48,7 +48,7 @@
             <td>{{ r.remarks }}</td>
             <td>
               <form method="post"
-                    action="{{ url_for('contracts.delete_refund', contract_id=contract.id, ref_id=r.id) }}"
+                    action="{{ url_for('contracts.delete_refund', contract_id=contract.id, refund_id=r.id) }}"
                     style="display:inline;">
                 <button type="submit" onclick="return confirm('确认删除该退款记录？');">删除</button>
               </form>
