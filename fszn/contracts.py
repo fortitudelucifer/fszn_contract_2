@@ -588,6 +588,22 @@ def new_contract():
         )
 
         db.session.add(contract)
+        db.session.flush()  # 先刷到数据库，拿到 contract.id
+
+        # 写入操作日志
+        log_operation(
+            user=user,
+            action='contract.create',
+            target_type='Contract',
+            target_id=contract.id,
+            message=f"创建项目/合同：{contract.name}",
+            extra={
+                "company_id": contract.company_id,
+                "project_code": contract.project_code,
+                "contract_number": contract.contract_number,
+            },
+        )
+
         db.session.commit()
 
         flash('项目/合同已创建')
@@ -691,6 +707,22 @@ def manage_leaders(contract_id):
                         person_id=person_id,
                     )
                     db.session.add(leader)
+                    db.session.flush()
+
+                    # 写入操作日志
+                    log_operation(
+                        user=user,
+                        action='leader.create',
+                        target_type='ProjectDepartmentLeader',
+                        target_id=leader.id,
+                        message="添加部门负责人",
+                        extra={
+                            "contract_id": contract.id,
+                            "department_id": department_id,
+                            "person_id": person_id,
+                        },
+                    )
+
                     db.session.commit()
                     flash('已添加部门负责人')
 
@@ -786,6 +818,25 @@ def manage_tasks(contract_id):
             remarks=remarks,
         )
         db.session.add(task)
+        db.session.flush()
+
+        # 写入操作日志
+        log_operation(
+            user=user,
+            action='task.create',
+            target_type='Task',
+            target_id=task.id,
+            message=f"创建任务：{title}",
+            extra={
+                "contract_id": contract.id,
+                "department_id": department_id,
+                "person_id": person_id,
+                "start_date": start_date.isoformat() if start_date else None,
+                "end_date": end_date.isoformat() if end_date else None,
+                "status": status,
+            },
+        )
+
         db.session.commit()
         flash('任务已创建')
         return redirect(url_for('contracts.manage_tasks', contract_id=contract.id))
@@ -873,6 +924,25 @@ def manage_procurements(contract_id):
             person_id=person_id,  # 🔹 新增
         )
         db.session.add(item)
+        db.session.flush()
+
+        # 写入操作日志
+        log_operation(
+            user=user,
+            action='procurement.create',
+            target_type='ProcurementItem',
+            target_id=item.id,
+            message=f"新增采购项：{item_name}",
+            extra={
+                "contract_id": contract.id,
+                "quantity": quantity,
+                "unit": unit,
+                "expected_date": expected_date.isoformat() if expected_date else None,
+                "status": status,
+                "person_id": person_id,
+            },
+        )
+
         db.session.commit()
         flash('采购项已添加')
         return redirect(url_for('contracts.manage_procurements', contract_id=contract.id))
@@ -956,6 +1026,23 @@ def manage_acceptances(contract_id):
             remarks=remarks,
         )
         db.session.add(acc)
+        db.session.flush()
+
+        # 写入操作日志
+        log_operation(
+            user=user,
+            action='acceptance.create',
+            target_type='Acceptance',
+            target_id=acc.id,
+            message=f"新增验收记录：{stage_name}",
+            extra={
+                "contract_id": contract.id,
+                "date": d.isoformat() if d else None,
+                "status": status,
+                "person_id": person_id,
+            },
+        )
+
         db.session.commit()
         flash('验收记录已添加')
         return redirect(url_for('contracts.manage_acceptances', contract_id=contract.id))
@@ -1053,6 +1140,23 @@ def manage_sales(contract_id):
             sales.deal_date = deal_date
             sales.sales_person_id = sales_person_id
             sales.remarks = remarks or None
+
+            db.session.flush()
+            log_operation(
+                user=user,
+                action='sales.update',
+                target_type='SalesInfo',
+                target_id=sales.id,
+                message='更新销售信息',
+                extra={
+                    "contract_id": contract.id,
+                    "quote_amount": quote_amount,
+                    "quote_date": quote_date.isoformat() if quote_date else None,
+                    "deal_date": deal_date.isoformat() if deal_date else None,
+                    "sales_person_id": sales_person_id,
+                },
+            )
+
             flash('销售信息已更新')
         else:
             # 创建
@@ -1065,10 +1169,28 @@ def manage_sales(contract_id):
                 remarks=remarks or None,
             )
             db.session.add(sales)
+            db.session.flush()
+
+            log_operation(
+                user=user,
+                action='sales.create',
+                target_type='SalesInfo',
+                target_id=sales.id,
+                message='创建销售信息',
+                extra={
+                    "contract_id": contract.id,
+                    "quote_amount": quote_amount,
+                    "quote_date": quote_date.isoformat() if quote_date else None,
+                    "deal_date": deal_date.isoformat() if deal_date else None,
+                    "sales_person_id": sales_person_id,
+                },
+            )
+
             flash('销售信息已创建')
 
         db.session.commit()
         return redirect(url_for('contracts.manage_sales', contract_id=contract.id))
+
 
     # GET：展示现有销售信息 + 编辑表单
     persons = Person.query.order_by(Person.id.asc()).all()
@@ -1242,6 +1364,22 @@ def manage_payments(contract_id):
             remarks=remarks,
         )
         db.session.add(p)
+        db.session.flush()
+
+        # 写入操作日志
+        log_operation(
+            user=user,
+            action='payment.create',
+            target_type='Payment',
+            target_id=p.id,
+            message=f"新增付款记录：金额={amount}",
+            extra={
+                "contract_id": contract.id,
+                "date": d.isoformat() if d else None,
+                "method": method,
+            },
+        )
+
         db.session.commit()
         flash('付款记录已添加')
         return redirect(url_for('contracts.manage_payments', contract_id=contract.id))
@@ -1261,6 +1399,8 @@ def manage_payments(contract_id):
 @contracts_bp.route('/<int:contract_id>/payments/<int:pay_id>/delete', methods=['POST'])
 @login_required
 def delete_payment(contract_id, pay_id):
+    user_id = session.get('user_id')
+    user = User.query.get(user_id) if user_id else None
     contract = Contract.query.get_or_404(contract_id)
     p = Payment.query.filter_by(id=pay_id, contract_id=contract.id).first_or_404()
     log_operation(
@@ -1319,6 +1459,21 @@ def manage_invoices(contract_id):
             remarks=remarks,
         )
         db.session.add(inv)
+        db.session.flush()
+
+        # 写入操作日志
+        log_operation(
+            user=user,
+            action='invoice.create',
+            target_type='Invoice',
+            target_id=inv.id,
+            message=f"新增开票：发票号={invoice_number or ''}, 金额={amount}",
+            extra={
+                "contract_id": contract.id,
+                "date": d.isoformat() if d else None,
+            },
+        )
+
         db.session.commit()
         flash('开票记录已添加')
         return redirect(url_for('contracts.manage_invoices', contract_id=contract.id))
@@ -1338,6 +1493,8 @@ def manage_invoices(contract_id):
 @contracts_bp.route('/<int:contract_id>/invoices/<int:inv_id>/delete', methods=['POST'])
 @login_required
 def delete_invoice(contract_id, inv_id):
+    user_id = session.get('user_id')
+    user = User.query.get(user_id) if user_id else None
     contract = Contract.query.get_or_404(contract_id)
     inv = Invoice.query.filter_by(id=inv_id, contract_id=contract.id).first_or_404()
     log_operation(
@@ -1397,6 +1554,22 @@ def manage_refunds(contract_id):
             remarks=remarks,
         )
         db.session.add(r)
+        db.session.flush()
+
+        # 写入操作日志
+        log_operation(
+            user=user,
+            action='refund.create',
+            target_type='Refund',
+            target_id=r.id,
+            message=f"新增退款记录：金额={amount}",
+            extra={
+                "contract_id": contract.id,
+                "date": d.isoformat() if d else None,
+                "method": method,
+            },
+        )
+
         db.session.commit()
         flash('退款记录已添加')
         return redirect(url_for('contracts.manage_refunds', contract_id=contract.id))
@@ -1464,6 +1637,23 @@ def manage_feedbacks(contract_id):
             completion_time=completion_time,
         )
         db.session.add(fb)
+        db.session.flush()
+
+        # 写入操作日志
+        log_operation(
+            user=user,
+            action='feedback.create',
+            target_type='Feedback',
+            target_id=fb.id,
+            message="新增客户反馈",
+            extra={
+                "contract_id": contract.id,
+                "handler_id": handler_id,
+                "has_result": bool(result),
+                "completion_time": completion_time.isoformat() if completion_time else None,
+            },
+        )
+
         db.session.commit()
         flash('反馈记录已添加')
         return redirect(url_for('contracts.manage_feedbacks', contract_id=contract.id))
@@ -1507,6 +1697,18 @@ def resolve_feedback(contract_id, feedback_id):
 
     fb.is_resolved = True
     fb.completion_time = datetime.utcnow()   # 解决时间写入 completion_time
+    # 写入操作日志
+    log_operation(
+        user=user,
+        action='feedback.resolve',
+        target_type='Feedback',
+        target_id=fb.id,
+        message='标记反馈为已解决',
+        extra={
+            "contract_id": contract.id,
+        },
+    )
+
     db.session.commit()
 
     flash('该反馈已标记为“已解决”。')
@@ -1525,6 +1727,18 @@ def unresolve_feedback(contract_id, feedback_id):
 
     fb.is_resolved = False
     fb.completion_time = None
+        # 写入操作日志
+    log_operation(
+        user=user,
+        action='feedback.unresolve',
+        target_type='Feedback',
+        target_id=fb.id,
+        message='标记反馈为未解决',
+        extra={
+            "contract_id": contract.id,
+        },
+    )
+
     db.session.commit()
 
     flash('该反馈已标记为“未解决”。')
@@ -1611,6 +1825,23 @@ def manage_files(contract_id):
         )
 
         db.session.add(pf)
+        db.session.flush()
+
+        # 写入操作日志
+        log_operation(
+            user=user,
+            action='file.upload',
+            target_type='ProjectFile',
+            target_id=pf.id,
+            message=f"上传文件：{original_filename}",
+            extra={
+                "contract_id": contract.id,
+                "file_type": file_type,
+                "version": version,
+                "is_public": is_public,
+            },
+        )
+
         db.session.commit()
 
         flash('文件上传成功')
