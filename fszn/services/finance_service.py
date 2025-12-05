@@ -8,9 +8,11 @@
   可以只改这个文件（例如返回空或脱敏数据），而不用到处改视图。
   以后如果要“临时不展示真实资金数据”，只要在这个函数里改成返回空/0/脱敏数据；
 """
+from __future__ import annotations
 
 from decimal import Decimal
 from typing import Optional, Dict, Any
+from datetime import date
 
 from ..models import Contract, SalesInfo
 

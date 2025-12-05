@@ -31,6 +31,12 @@ from .services.finance_service import (
     delete_refund,
 )
 
+from .services.file_service import (
+    evaluate_file_download,
+    evaluate_file_delete,
+)
+
+from .services import create_task, delete_task
 
 # 操作日志记录函数
 
@@ -990,25 +996,53 @@ def manage_tasks(contract_id):
             except ValueError:
                 person_id = None
 
-        task = Task(
-            contract_id=contract.id,
+        # task = Task(
+        #     contract_id=contract.id,
+        #     department_id=department_id,
+        #     person_id=person_id,
+        #     title=title,
+        #     start_date=start_date,
+        #     end_date=end_date,
+        #     status=status,
+        #     remarks=remarks,
+        # )
+        # db.session.add(task)
+        # db.session.flush()
+
+        # # 写入操作日志
+        # log_operation(
+        #     user=user,
+        #     action='task.create',
+        #     target_type='Task',
+        #     target_id=task.id,
+        #     message=f"创建任务：{title}",
+        #     extra={
+        #         "contract_id": contract.id,
+        #         "department_id": department_id,
+        #         "person_id": person_id,
+        #         "start_date": start_date.isoformat() if start_date else None,
+        #         "end_date": end_date.isoformat() if end_date else None,
+        #         "status": status,
+        #     },
+        # )
+
+        # db.session.commit()
+        t = create_task(
+            contract=contract,
+            title=title,
             department_id=department_id,
             person_id=person_id,
-            title=title,
             start_date=start_date,
             end_date=end_date,
             status=status,
             remarks=remarks,
         )
-        db.session.add(task)
-        db.session.flush()
 
-        # 写入操作日志
         log_operation(
             user=user,
             action='task.create',
             target_type='Task',
-            target_id=task.id,
+            target_id=t.id,
             message=f"创建任务：{title}",
             extra={
                 "contract_id": contract.id,
@@ -1049,10 +1083,25 @@ def manage_tasks(contract_id):
 @login_required
 def delete_task(contract_id, task_id):
     contract = Contract.query.get_or_404(contract_id)
-    task = Task.query.filter_by(id=task_id, contract_id=contract.id).first_or_404()
-    db.session.delete(task)
-    db.session.commit()
-    flash('任务已删除')
+    # task = Task.query.filter_by(id=task_id, contract_id=contract.id).first_or_404()
+    # db.session.delete(task)
+    # db.session.commit()
+    # flash('任务已删除')
+    task = delete_task(contract=contract, task_id=task_id)
+
+    log_operation(
+        user=user,
+        action='task.delete',
+        target_type='Task',
+        target_id=task.id,
+        message=f"删除任务：{task.title}",
+        extra={
+            "contract_id": contract.id,
+        },
+    )
+
+db.session.commit()
+flash('任务已删除')
     return redirect(url_for('contracts.manage_tasks', contract_id=contract.id))
 
 
@@ -2173,28 +2222,56 @@ def download_file(contract_id, file_id):
     # - 管理员 / 老板 / 软件工程师：可以下载所有
     # - 其它员工：只能下载 owner_role == 自己 role 的文件
     # - 客户角色：只能下载 is_public=True 且 file_type in ('contract', 'tech')
-    role = (user.role or '').strip().lower() if user and user.role else ''
+    # role = (user.role or '').strip().lower() if user and user.role else ''
 
-    if role in ('admin', 'boss', 'software_engineer'):
-        pass  # 全部允许
-    elif role == 'customer':
-        if not (pf.is_public and pf.file_type in ('contract', 'tech')):
-            flash('你没有权限下载此文件')
-            return redirect(url_for('contracts.manage_files', contract_id=contract.id))
-    else:
-        # 内部普通员工
-        if pf.owner_role and pf.owner_role != user.role:
-            flash('你只能下载自己部门上传的文件')
-            return redirect(url_for('contracts.manage_files', contract_id=contract.id))
+    # if role in ('admin', 'boss', 'software_engineer'):
+    #     pass  # 全部允许
+    # elif role == 'customer':
+    #     if not (pf.is_public and pf.file_type in ('contract', 'tech')):
+    #         flash('你没有权限下载此文件')
+    #         return redirect(url_for('contracts.manage_files', contract_id=contract.id))
+    # else:
+    #     # 内部普通员工
+    #     if pf.owner_role and pf.owner_role != user.role:
+    #         flash('你只能下载自己部门上传的文件')
+    #         return redirect(url_for('contracts.manage_files', contract_id=contract.id))
 
-    upload_folder = current_app.config['UPLOAD_FOLDER']
+    # upload_folder = current_app.config['UPLOAD_FOLDER']
+    # return send_from_directory(
+    #     upload_folder,
+    #     pf.stored_filename,
+    #     as_attachment=True,
+    #     download_name=pf.stored_filename #  pf.original_filename 用原始文件名下载
+    # )
+
+    # 调用 Service 评估权限 + 日志信息
+    result = evaluate_file_download(user=user, contract=contract, pf=pf)
+
+    # 统一写操作日志（不管成功或失败）
+    log_operation(
+        user=user,
+        action=result["log_action"],
+        target_type="ProjectFile",
+        target_id=pf.id,
+        message=result["log_message"],
+        extra=result["log_extra"],
+    )
+    db.session.commit()
+
+    # 若被拒绝，提示并返回文件管理页
+    if not result["allowed"]:
+        if result["flash_message"]:
+            flash(result["flash_message"])
+        return redirect(url_for("contracts.manage_files", contract_id=contract.id))
+
+    # 允许下载，返回实际文件
+    upload_folder = current_app.config["UPLOAD_FOLDER"]
     return send_from_directory(
         upload_folder,
         pf.stored_filename,
         as_attachment=True,
-        download_name=pf.stored_filename #  pf.original_filename 用原始文件名下载
+        download_name=pf.stored_filename,  # 如需用原始名，可改为 pf.original_filename
     )
-
 
 # 删除文件（软删除+风险提示）
 
@@ -2211,28 +2288,43 @@ def delete_file(contract_id, file_id):
         is_deleted=False
     ).first_or_404()
 
-    # 权限控制：上传者 / 管理员 / 老板 可以删
-    role = (user.role or '').strip().lower() if user and user.role else ''
-    if not user or (user.id != pf.uploader_id and role not in ('admin', 'boss')):
-        flash('你没有权限删除此文件')
-        return redirect(url_for('contracts.manage_files', contract_id=contract.id))
+    # 调用 Service 评估是否允许删除以及日志内容
+    result = evaluate_file_delete(user=user, contract=contract, pf=pf)
+
+    if not result["allowed"]:
+        # 无权限删除：写日志 + 提示 + 回退
+        log_operation(
+            user=user,
+            action=result["log_action"],  # file.delete_denied
+            target_type="ProjectFile",
+            target_id=pf.id,
+            message=result["log_message"],
+            extra=result["log_extra"],
+        )
+        db.session.commit()
+
+        if result["flash_message"]:
+            flash(result["flash_message"])
+        return redirect(url_for("contracts.manage_files", contract_id=contract.id))
+
+    # # 权限控制：上传者 / 管理员 / 老板 可以删
+    # role = (user.role or '').strip().lower() if user and user.role else ''
+    # if not user or (user.id != pf.uploader_id and role not in ('admin', 'boss')):
+    #     flash('你没有权限删除此文件')
+    #     return redirect(url_for('contracts.manage_files', contract_id=contract.id))
 
     pf.is_deleted = True
 
-    # 🔹 写入操作日志
+    # 写入软删除日志
     log_operation(
         user=user,
-        action='file.delete_soft',
-        target_type='ProjectFile',
+        action=result["log_action"],  # file.delete_soft
+        target_type="ProjectFile",
         target_id=pf.id,
-        message=f"软删除文件：{pf.original_filename}",
-        extra={
-            "contract_id": contract.id,
-            "stored_filename": pf.stored_filename,
-            "file_type": pf.file_type,
-        },
+        message=result["log_message"],
+        extra=result["log_extra"],
     )
     db.session.commit()
 
-    flash('文件已标记为删除（普通用户将无法再访问）')
+    flash('文件已标记为删除')
     return redirect(url_for('contracts.manage_files', contract_id=contract.id))
