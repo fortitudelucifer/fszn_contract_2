@@ -3,7 +3,12 @@
 {% block title %}操作日志{% endblock %}
 
 {% block content %}
-<h1>操作日志</h1>
+<h1>
+    操作日志
+    {% if current_contract %}
+    - 合同 {{ current_contract.project_code }}（ID={{ current_contract.id }}）
+    {% endif %}
+</h1>
 
 {% if current_contract %}
 <p>
@@ -14,200 +19,132 @@
 {% endif %}
 
 <form method="get" style="margin-bottom: 1em;">
-    <p>
-        <label>
-            操作类型：
-            <select name="action">
-                <option value="">全部</option>
-                <option value="contract.set_planned_delivery_date"
-                        {% if filters.action=='contract.set_planned_delivery_date' %}selected{% endif %}>
-                    修改计划交付时间
-                </option>
-                <option value="contract.delete"
-                        {% if filters.action=='contract.delete' %}selected{% endif %}>
-                    删除合同
-                </option>
-                <option value="procurement.delete"
-                        {% if filters.action=='procurement.delete' %}selected{% endif %}>
-                    删除采购项
-                </option>
-                <option value="acceptance.delete"
-                        {% if filters.action=='acceptance.delete' %}selected{% endif %}>
-                    删除验收记录
-                </option>
-                <option value="payment.delete"
-                        {% if filters.action=='payment.delete' %}selected{% endif %}>
-                    删除付款记录
-                </option>
-                <option value="invoice.delete"
-                        {% if filters.action=='invoice.delete' %}selected{% endif %}>
-                    删除开票记录
-                </option>
-                <option value="sales.delete"
-                        {% if filters.action=='sales.delete' %}selected{% endif %}>
-                    删除销售信息
-                </option>
-                <option value="file.delete_soft"
-                        {% if filters.action=='file.delete_soft' %}selected{% endif %}>
-                    删除文件
-                </option>
-            </select>
-        </label>
-
-        <label style="margin-left: 1em;">
-            对象类型：
-            <select name="target_type">
-                <option value="">全部</option>
-                <option value="Contract"
-                        {% if filters.target_type=='Contract' %}selected{% endif %}>
-                    合同
-                </option>
-                <option value="SalesInfo"
-                        {% if filters.target_type=='SalesInfo' %}selected{% endif %}>
-                    销售信息
-                </option>
-                <option value="ProcurementItem"
-                        {% if filters.target_type=='ProcurementItem' %}selected{% endif %}>
-                    采购项
-                </option>
-                <option value="Acceptance"
-                        {% if filters.target_type=='Acceptance' %}selected{% endif %}>
-                    验收记录
-                </option>
-                <option value="Payment"
-                        {% if filters.target_type=='Payment' %}selected{% endif %}>
-                    付款记录
-                </option>
-                <option value="Invoice"
-                        {% if filters.target_type=='Invoice' %}selected{% endif %}>
-                    开票记录
-                </option>
-                <option value="Refund"
-                        {% if filters.target_type=='Refund' %}selected{% endif %}>
-                    退款记录
-                </option>
-                <option value="Feedback"
-                        {% if filters.target_type=='Feedback' %}selected{% endif %}>
-                    客户反馈
-                </option>
-                <option value="ProjectFile"
-                        {% if filters.target_type=='ProjectFile' %}selected{% endif %}>
-                    文件
-                </option>
-            </select>
-        </label>
-
-        <label style="margin-left: 1em;">
-            目标ID：
-            <input type="text" name="target_id" value="{{ filters.target_id }}" style="width: 80px;"
-                   placeholder="可留空">
-        </label>
-
-        <button type="submit" style="margin-left: 0.5em;">筛选</button>
-        <a href="{{ url_for('contracts.operation_logs') }}" style="margin-left: 0.5em;">清空筛选</a>
-    </p>
+    <div>
+        <label>动作(action)：</label>
+        <input type="text" name="action" value="{{ filters.action or '' }}">
+    </div>
+    <div>
+        <label>目标类型(target_type)：</label>
+        <input type="text" name="target_type" value="{{ filters.target_type or '' }}">
+    </div>
+    <div>
+        <label>目标ID(target_id)：</label>
+        <input type="text" name="target_id" value="{{ filters.target_id or '' }}">
+    </div>
+    <div>
+        <label>用户ID(user_id)：</label>
+        <input type="text" name="user_id" value="{{ filters.user_id or '' }}">
+    </div>
+    <div>
+        <label>关键字(q)：</label>
+        <input type="text" name="q" value="{{ filters.q or '' }}" placeholder="在说明 / extra_data 中搜索">
+    </div>
+    <div>
+        <label>开始日期(start_date)：</label>
+        <input type="date" name="start_date" value="{{ filters.start_date or '' }}">
+    </div>
+    <div>
+        <label>结束日期(end_date)：</label>
+        <input type="date" name="end_date" value="{{ filters.end_date or '' }}">
+    </div>
+    <div style="margin-top: 0.5em;">
+        <button type="submit">筛选</button>
+        <a href="{{ url_for('contracts.operation_logs') }}">重置</a>
+        {% if current_contract %}
+        <!-- 返回当前合同的日志页（保持原有入口不变） -->
+        <a href="{{ url_for('contracts.contract_operation_logs', contract_id=current_contract.id) }}">仅看该合同</a>
+        {% endif %}
+    </div>
 </form>
 
-
 {% if rows %}
-<table border="1" cellpadding="4" cellspacing="0" style="width: 100%; max-width: 1200px;">
+<table border="1" cellpadding="4" cellspacing="0">
     <thead>
         <tr>
-            <th>时间</th>
+            <th>操作时间</th>
             <th>用户</th>
-            <th>操作内容</th>
-            <th>对象</th>
-            <th>详情</th>
+            <th>操作类型</th>
+            <th>目标</th>
+            <th>说明</th>
+            <th>额外信息</th>
         </tr>
     </thead>
     <tbody>
         {% for row in rows %}
         {% set log = row.log %}
-        {% set u = row.user %}
-        {% set extra = row.extra %}
         <tr>
-            <td style="white-space: nowrap;">
-                {{ log.created_at.strftime('%Y-%m-%d %H:%M:%S') if log.created_at else '' }}
-            </td>
             <td>
-                {% if u %}
-                {{ u.username }}（ID={{ u.id }}）
-                {% else %}
-                系统
+                {% if log.created_at %}
+                {{ log.created_at.strftime('%Y-%m-%d %H:%M:%S') }}
                 {% endif %}
             </td>
             <td>
-                {# 人性化描述 action #}
-                {% if log.action == 'contract.delete' %}
-                删除合同
-                {% elif log.action == 'contract.set_planned_delivery_date' %}
-                更新合同的计划交付时间
-                {% elif log.action == 'file.delete_soft' %}
-                删除项目文件
-                {% elif log.action == 'sales.delete' %}
-                删除销售信息
-                {% elif log.action == 'procurement.delete' %}
-                删除采购项
-                {% elif log.action == 'acceptance.delete' %}
-                删除验收记录
-                {% elif log.action == 'payment.delete' %}
-                删除付款记录
-                {% elif log.action == 'invoice.delete' %}
-                删除开票记录
-                {% else %}
-                {{ log.action }}
-                {% endif %}
-            </td>
-            <td>
-                {# 目标对象的简要描述 #}
-                {% if log.target_type == 'Contract' %}
-                合同(ID={{ log.target_id }})
-                {% if extra.project_code %}
-                <br>项目编号：{{ extra.project_code }}
-                {% endif %}
-                {% if extra.contract_number %}
-                <br>合同编号：{{ extra.contract_number }}
-                {% endif %}
-                {% elif log.target_type %}
-                {{ log.target_type }} (ID={{ log.target_id or '' }})
+                {% if row.user %}
+                {{ row.user.username }}（ID={{ row.user.id }}）
+                {% elif log.user_id %}
+                用户ID={{ log.user_id }}
                 {% else %}
                 -
                 {% endif %}
             </td>
+            <td>{{ log.action }}</td>
             <td>
-                {# 详情：先显示 message，再把 extra 里的关键字段展开 #}
-                {% if log.message %}
-                <div>{{ log.message }}</div>
+                {{ log.target_type or '' }}
+                {% if log.target_id %}
+                #{{ log.target_id }}
                 {% endif %}
-
-                {% if extra %}
-                <div style="margin-top: 0.3em; font-size: 90%;">
-                    {% if extra.planned_delivery_date %}
-                    <div>计划交付时间：{{ extra.planned_delivery_date }}</div>
-                    {% endif %}
-                    {% if extra.amount is not none %}
-                    <div>金额：{{ extra.amount }}</div>
-                    {% endif %}
-                    {% if extra.date %}
-                    <div>日期：{{ extra.date }}</div>
-                    {% endif %}
-                    {% if extra.file_type %}
-                    <div>文件类型：{{ extra.file_type }}</div>
-                    {% endif %}
-                    {# 兜底：把 extra 中其他键也展示一下 #}
-                    {% for k, v in extra.items() %}
-                    {% if k not in ['planned_delivery_date', 'amount', 'date', 'file_type', 'project_code', 'contract_number'] %}
+            </td>
+            <td>{{ log.message or '' }}</td>
+            <td>
+                {% if row.extra %}
+                <div>
+                    {% for k, v in row.extra.items() %}
+                    {% if v is not none and v != '' %}
                     <div>{{ k }}：{{ v }}</div>
                     {% endif %}
                     {% endfor %}
                 </div>
+                {% else %}
+                -
                 {% endif %}
             </td>
         </tr>
         {% endfor %}
     </tbody>
 </table>
+
+{% if pagination %}
+<div style="margin-top: 1em;">
+    <span>
+        第 {{ pagination.page }} / {{ pagination.total_pages }} 页，
+        共 {{ pagination.total }} 条记录
+    </span>
+    {% if pagination.has_prev %}
+    <a href="{{ url_for('contracts.operation_logs',
+                            page=pagination.page - 1,
+                            action=filters.action,
+                            target_type=filters.target_type,
+                            target_id=filters.target_id,
+                            user_id=filters.user_id,
+                            q=filters.q,
+                            start_date=filters.start_date,
+                            end_date=filters.end_date) }}">上一页</a>
+    {% endif %}
+    {% if pagination.has_next %}
+    <a href="{{ url_for('contracts.operation_logs',
+                            page=pagination.page + 1,
+                            action=filters.action,
+                            target_type=filters.target_type,
+                            target_id=filters.target_id,
+                            user_id=filters.user_id,
+                            q=filters.q,
+                            start_date=filters.start_date,
+                            end_date=filters.end_date) }}">下一页</a>
+    {% endif %}
+</div>
+{% endif %}
 {% else %}
 <p>当前没有符合条件的操作记录。</p>
 {% endif %}
+
 {% endblock %}

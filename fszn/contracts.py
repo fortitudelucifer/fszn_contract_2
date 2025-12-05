@@ -11,6 +11,8 @@ from flask import (
 )
 
 from . import db
+from sqlalchemy import or_, and_  # 新增：用于日志关键字检索的 OR 条件
+
 from .auth import login_required
 from .models import (
     Contract, Company, User,
@@ -18,6 +20,17 @@ from .models import (
     Task, ProcurementItem, Acceptance, Payment, Invoice, Refund, Feedback,
     SalesInfo, ProjectFile, OperationLog
 )
+
+from .services.finance_service import (
+    get_contract_finance_summary,
+    create_payment,
+    delete_payment,
+    create_invoice,
+    delete_invoice,
+    create_refund,
+    delete_refund,
+)
+
 
 # 操作日志记录函数
 
@@ -117,17 +130,25 @@ ALLOWED_EXTENSIONS = {'pdf', 'png', 'jpg', 'jpeg', 'doc', 'docx', 'xls', 'xlsx'}
 # 不同角色允许上传的文件类型
 ROLE_ALLOWED_TYPES = {
     # 你可以根据自己 User.role 的实际值调整这些 key
-    'admin': {'contract', 'tech', 'drawing', 'invoice', 'ticket'},
-    'boss': {'contract', 'tech', 'drawing', 'invoice', 'ticket'},
-    'software_engineer': {'drawing', 'tech'},
-    'mechanical_engineer': {'drawing', 'tech'},
-    'electrical_engineer': {'drawing', 'tech'},
-    'sales': {'contract', 'tech', 'ticket'},
-    'finance': {'invoice'},
-    'procurement': {'invoice'},
+    'admin': {'contract', 'tech', 'drawing', 'invoice', 'ticket', 'other'},
+    'boss': {'contract', 'tech', 'drawing', 'invoice', 'ticket', 'other'},
+    'software_engineer': {'drawing', 'tech', 'other'},
+    'mechanical_engineer': {'drawing', 'tech', 'other'},
+    'electrical_engineer': {'drawing', 'tech', 'other'},
+    'sales': {'contract', 'tech', 'ticket', 'other'},
+    'finance': {'invoice', 'other'},
+    'procurement': {'invoice', 'other'},
     # 默认角色（找不到时）
-    'default': {'contract', 'tech', 'drawing', 'invoice', 'ticket'},
+    'default': {'contract', 'tech'},
 }
+
+# 仅限老板 / 软件工程师可见的文件操作动作
+SENSITIVE_FILE_ACTIONS = (
+    'file.download',
+    'file.download_denied',
+    'file.delete_denied',
+)
+
 
 
 def allowed_file(filename: str) -> bool:
@@ -157,7 +178,7 @@ def sanitize_part(text: str) -> str:
 
 def generate_file_name(contract: Contract, file_type: str, version: str, author: str, original_filename: str) -> str:
     """按照约定规则生成文件名：
-    客户公司_项目编号_合同编号_合同名称_上传日期_文件类型_版本号_作者.扩展名
+    客户公司_项目编号_合同编号_合同名称_上传日期_文件类型_原始文件名_版本号_作者.扩展名
     """
     if '.' in original_filename:
         ext = '.' + original_filename.rsplit('.', 1)[1].lower()
@@ -173,6 +194,13 @@ def generate_file_name(contract: Contract, file_type: str, version: str, author:
     version_part = sanitize_part(version or 'V1')
     author_part = sanitize_part(author or 'unknown')
 
+    # 从原始文件名中取出不带扩展名的部分，放到命名规则中
+    if '.' in original_filename:
+        original_name_without_ext = original_filename.rsplit('.', 1)[0]
+    else:
+        original_name_without_ext = original_filename
+    original_name_part = sanitize_part(original_name_without_ext or 'NoOriginalName')
+
     parts = [
         company_name or 'NoCompany',
         project_code or 'NoProject',
@@ -180,6 +208,7 @@ def generate_file_name(contract: Contract, file_type: str, version: str, author:
         contract_name or 'NoName',
         today_str,
         file_type_part,
+        original_name_part,  # 🔹 新增：原始文件名
         version_part,
         author_part,
     ]
@@ -365,41 +394,116 @@ def list_contracts():
 @contracts_bp.route('/operation_logs')
 @login_required
 def operation_logs():
-    """操作日志列表（最近若干条，全局）"""
+    """操作日志列表（全局，支持过滤 + 分页）"""
+    # 当前登录用户
     user_id = session.get('user_id')
     current_user = User.query.get(user_id) if user_id else None
 
-    # 查询参数
+    # ========= 1）读取查询参数 =========
     action_kw = (request.args.get('action') or '').strip()
     target_type = (request.args.get('target_type') or '').strip()
     target_id_raw = (request.args.get('target_id') or '').strip()
+    user_id_raw = (request.args.get('user_id') or '').strip()
+    keyword = (request.args.get('q') or '').strip()
+    start_date_str = (request.args.get('start_date') or '').strip()
+    end_date_str = (request.args.get('end_date') or '').strip()
 
-    query = OperationLog.query.order_by(OperationLog.created_at.desc())
+    # 分页参数
+    page = request.args.get('page', 1, type=int)
+    if page < 1:
+        page = 1
+    per_page = 50
 
+    # ========= 2）构造查询 =========
+    query = OperationLog.query
+
+    # 按动作模糊匹配
     if action_kw:
         query = query.filter(OperationLog.action.ilike(f"%{action_kw}%"))
 
+    # 按目标类型精确匹配
     if target_type:
         query = query.filter(OperationLog.target_type == target_type)
 
-    target_id = None
+    # 按目标 ID 精确匹配
     if target_id_raw:
         try:
-            target_id = int(target_id_raw)
-            query = query.filter(OperationLog.target_id == target_id)
+            target_id_val = int(target_id_raw)
+            query = query.filter(OperationLog.target_id == target_id_val)
         except ValueError:
-            target_id = None
+            # 用户乱填了非数字，直接忽略
+            pass
 
-    logs = query.limit(200).all()
+    # 按用户 ID 精确匹配
+    if user_id_raw:
+        try:
+            uid_val = int(user_id_raw)
+            query = query.filter(OperationLog.user_id == uid_val)
+        except ValueError:
+            pass
 
-    # 预加载用户
+    # 按时间范围过滤（使用已有的 parse_date 辅助函数）
+    start_date = parse_date(start_date_str)
+    end_date = parse_date(end_date_str)
+
+    if start_date:
+        # 当天 00:00:00 起
+        query = query.filter(
+            OperationLog.created_at >= datetime.combine(start_date, datetime.min.time())
+        )
+    if end_date:
+        # 当天 23:59:59.999999 止
+        end_dt = datetime.combine(end_date, datetime.max.time())
+        query = query.filter(OperationLog.created_at <= end_dt)
+
+    # 关键字搜索：在 message 和 extra_data 内模糊匹配
+    if keyword:
+        like = f"%{keyword}%"
+        query = query.filter(
+            or_(
+                OperationLog.message.ilike(like),
+                OperationLog.extra_data.ilike(like),
+            )
+        )
+
+    # ========= 2.5）按角色过滤敏感文件操作日志 =========
+    privileged_roles = ('boss', 'software_engineer')
+    role = (current_user.role or '').strip().lower() if current_user and current_user.role else ''
+
+    if role not in privileged_roles:
+        # 非特权角色（含普通内部员工 / customer）：
+        # 不允许看到 文件下载 / 下载被拒 / 删除被拒 这三类日志
+        query = query.filter(
+            ~and_(
+                OperationLog.target_type == 'ProjectFile',
+                OperationLog.action.in_(SENSITIVE_FILE_ACTIONS),
+            )
+        )
+
+
+
+    # ========= 3）统计总数 + 分页 =========
+    total = query.count()
+    total_pages = (total + per_page - 1) // per_page if total > 0 else 1
+    if page > total_pages and total_pages > 0:
+        page = total_pages
+
+    logs = (
+        query
+        .order_by(OperationLog.created_at.desc())
+        .offset((page - 1) * per_page)
+        .limit(per_page)
+        .all()
+    )
+
+    # ========= 4）预加载用户（避免 N+1） =========
     user_ids = {l.user_id for l in logs if l.user_id}
     users_map: dict[int, User] = {}
     if user_ids:
         for u in User.query.filter(User.id.in_(user_ids)):
             users_map[u.id] = u
 
-    # 构造更适合模板使用的 rows
+    # 构造模板使用的 rows 结构
     rows = []
     for log in logs:
         extra = _parse_extra_data(log.extra_data)
@@ -412,6 +516,16 @@ def operation_logs():
             )
         )
 
+    # 简单分页信息（模板使用）
+    pagination = dict(
+        page=page,
+        per_page=per_page,
+        total=total,
+        total_pages=total_pages,
+        has_prev=page > 1,
+        has_next=page < total_pages,
+    )
+
     return render_template(
         'contracts/operation_logs.html',
         user=current_user,
@@ -420,7 +534,14 @@ def operation_logs():
             action=action_kw,
             target_type=target_type,
             target_id=target_id_raw,
+            user_id=user_id_raw,
+            q=keyword,
+            start_date=start_date_str,
+            end_date=end_date_str,
         ),
+        pagination=pagination,
+        # 全局日志页没有指定合同，这里显式传 None，模板里用 if 判断
+        current_contract=None,
     )
 
 
@@ -429,31 +550,69 @@ def operation_logs():
 
 # 某个合同的操作日志
 
+
+# 文件操作日志
+
 @contracts_bp.route('/<int:contract_id>/operation_logs')
 @login_required
 def contract_operation_logs(contract_id):
-    """某个合同相关的操作日志"""
+    """某个合同相关的操作日志（会过滤敏感文件操作日志）"""
     user_id = session.get('user_id')
     current_user = User.query.get(user_id) if user_id else None
 
     contract = Contract.query.get_or_404(contract_id)
 
-    # 先简单只看 target_type='Contract' 的日志
-    logs = (
+    # ========= 1）基础查询：该合同相关日志 =========
+    logs_query = (
         OperationLog.query
-        .filter_by(target_type='Contract', target_id=contract.id)
+        .filter(OperationLog.target_id == contract.id)
+        .filter(
+            OperationLog.target_type.in_([
+                'Contract',
+                'ProjectDepartmentLeader',
+                'Task',
+                'ProjectFile',
+                'Payment',
+                'Invoice',
+                'Refund',
+                'Feedback',
+                'ProcurementItem',
+                'Acceptance',
+            ])
+        )
+    )
+
+    # ========= 2）按角色过滤敏感文件操作日志 =========
+    # 仅 boss 和 software_engineer 可以查看以下三类敏感动作：
+    #   file.download / file.download_denied / file.delete_denied
+    privileged_roles = ('boss', 'software_engineer')
+    role = (current_user.role or '').strip().lower() if current_user and current_user.role else ''
+
+    if role not in privileged_roles:
+        # 普通用户：过滤掉敏感日志
+        logs_query = logs_query.filter(
+            ~and_(
+                OperationLog.target_type == 'ProjectFile',
+                OperationLog.action.in_(SENSITIVE_FILE_ACTIONS),
+            )
+        )
+
+    # ========= 3）排序 + 限制记录数 =========
+    logs = (
+        logs_query
         .order_by(OperationLog.created_at.desc())
         .limit(200)
         .all()
     )
 
+    # ========= 4）预加载用户信息 =========
     user_ids = {l.user_id for l in logs if l.user_id}
     users_map = {}
     if user_ids:
         for u in User.query.filter(User.id.in_(user_ids)):
             users_map[u.id] = u
 
-    # 构造 rows（和全局日志接口保持一致）
+    # ========= 5）构造模板 rows =========
     rows = []
     for log in logs:
         extra = _parse_extra_data(log.extra_data)
@@ -477,8 +636,6 @@ def contract_operation_logs(contract_id):
         ),
         current_contract=contract,
     )
-
-
 
 
 # 更新合同的计划交付时间
@@ -754,8 +911,12 @@ def manage_leaders(contract_id):
 
 @contracts_bp.route('/<int:contract_id>/leaders/<int:leader_id>/delete', methods=['POST'])
 @login_required
-def delete_leader(contract_id, leader_id):
-    """删除某条部门负责人记录"""
+def delete_leader(contract_id: int, leader_id: int):
+    """删除某条部门负责人记录，并记录操作日志"""
+    # 当前登录用户，用于日志审计
+    user_id = session.get('user_id')
+    user = User.query.get(user_id) if user_id else None
+
     contract = Contract.query.get_or_404(contract_id)
 
     leader = ProjectDepartmentLeader.query.filter_by(
@@ -763,11 +924,33 @@ def delete_leader(contract_id, leader_id):
         contract_id=contract.id
     ).first_or_404()
 
+    # 提前保存需要写入日志的字段
+    department_id = leader.department_id
+    person_id = leader.person_id
+
+    # 先删除对象（但此时还未提交事务）
     db.session.delete(leader)
+
+    # 写入操作日志（交给调用方统一 commit）
+    log_operation(
+        user=user,
+        action='leader.delete',
+        target_type='ProjectDepartmentLeader',
+        target_id=leader_id,
+        message='删除部门负责人',
+        extra={
+            "contract_id": contract.id,
+            "department_id": department_id,
+            "person_id": person_id,
+        },
+    )
+
+    # 最后统一提交事务
     db.session.commit()
     flash('该负责人已移除')
 
     return redirect(url_for('contracts.manage_leaders', contract_id=contract.id))
+
 
 @contracts_bp.route('/<int:contract_id>/tasks', methods=['GET', 'POST'])
 @login_required
@@ -1282,38 +1465,41 @@ def contract_overview(contract_id):
     # 当前项目状态（文本 + 颜色级别）
     status_text, status_level = get_contract_status(contract)
 
-    #  财务汇总
-    zero = Decimal('0.00')
+    # #  财务汇总
+    # zero = Decimal('0.00')
 
-    # 报价金额（作为合同金额使用）
-    quote_amount = None
-    if sales and getattr(sales, 'quote_amount', None) is not None:
-        quote_amount = sales.quote_amount
+    # # 报价金额（作为合同金额使用）
+    # quote_amount = None
+    # if sales and getattr(sales, 'quote_amount', None) is not None:
+    #     quote_amount = sales.quote_amount
 
-    # 已收款总额 / 退款总额 / 实收净额
-    paid_total = sum((p.amount or zero) for p in contract.payments)
-    refund_total = sum((r.amount or zero) for r in contract.refunds)
-    net_received = paid_total - refund_total
+    # # 已收款总额 / 退款总额 / 实收净额
+    # paid_total = sum((p.amount or zero) for p in contract.payments)
+    # refund_total = sum((r.amount or zero) for r in contract.refunds)
+    # net_received = paid_total - refund_total
 
-    # 已开票总额
-    invoiced_total = sum((inv.amount or zero) for inv in contract.invoices)
+    # # 已开票总额
+    # invoiced_total = sum((inv.amount or zero) for inv in contract.invoices)
 
-    # 剩余应收 / 剩余待开票
-    receivable_remaining = None
-    invoice_remaining = None
-    if quote_amount is not None:
-        receivable_remaining = quote_amount - net_received
-        invoice_remaining = quote_amount - invoiced_total
+    # # 剩余应收 / 剩余待开票
+    # receivable_remaining = None
+    # invoice_remaining = None
+    # if quote_amount is not None:
+    #     receivable_remaining = quote_amount - net_received
+    #     invoice_remaining = quote_amount - invoiced_total
 
-    finance = dict(
-        quote_amount=quote_amount,
-        paid_total=paid_total,
-        refund_total=refund_total,
-        net_received=net_received,
-        invoiced_total=invoiced_total,
-        receivable_remaining=receivable_remaining,
-        invoice_remaining=invoice_remaining,
-    )
+    # finance = dict(
+    #     quote_amount=quote_amount,
+    #     paid_total=paid_total,
+    #     refund_total=refund_total,
+    #     net_received=net_received,
+    #     invoiced_total=invoiced_total,
+    #     receivable_remaining=receivable_remaining,
+    #     invoice_remaining=invoice_remaining,
+    # )
+
+    # 财务汇总：交给 FinanceService 统一处理
+    finance = get_contract_finance_summary(contract, sales=sales)
 
     return render_template(
         'contracts/overview.html',
@@ -1331,8 +1517,10 @@ def contract_overview(contract_id):
             fb=fb_count,
             files=files_count,
         ),
-        status_text=status_text,
-        status_level=status_level,
+        status=dict(
+            text=status_text,
+            level=status_level,
+        ),
         finance=finance,  # 传进模板
     )
 
@@ -1371,27 +1559,40 @@ def manage_payments(contract_id):
             flash('日期格式错误')
             return redirect(url_for('contracts.manage_payments', contract_id=contract.id))
 
-        p = Payment(
-            contract_id=contract.id,
+        # p = Payment(
+        #     contract_id=contract.id,
+        #     amount=amount,
+        #     date=d,
+        #     method=method,
+        #     remarks=remarks,
+        # )
+        # db.session.add(p)
+        # db.session.flush()
+
+        # 交给 Finance Service 创建付款记录（不在这里直接操作模型）
+        p = create_payment(
+            contract=contract,
             amount=amount,
-            date=d,
+            pay_date=d,
             method=method,
             remarks=remarks,
         )
-        db.session.add(p)
-        db.session.flush()
+
 
         # 写入操作日志
         log_operation(
             user=user,
             action='payment.create',
-            target_type='Payment',
-            target_id=p.id,
+            target_type='Contract',
+            target_id=contract.id,
             message=f"新增付款记录：金额={amount}",
             extra={
+                "payment_id": p.id,
                 "contract_id": contract.id,
+                "amount": float(amount),
                 "date": d.isoformat() if d else None,
-                "method": method,
+                "method": method or None,
+                "remarks": remarks or None,
             },
         )
 
@@ -1417,12 +1618,14 @@ def delete_payment(contract_id, pay_id):
     user_id = session.get('user_id')
     user = User.query.get(user_id) if user_id else None
     contract = Contract.query.get_or_404(contract_id)
-    p = Payment.query.filter_by(id=pay_id, contract_id=contract.id).first_or_404()
+    # p = Payment.query.filter_by(id=pay_id, contract_id=contract.id).first_or_404()
+    # 交给 Finance Service 做查询 + delete（不提交事务）
+    p = delete_payment(contract=contract, pay_id=pay_id)
     log_operation(
         user=user,
         action='payment.delete',
-        target_type='Payment',
-        target_id=p.id,
+        target_type='Contract',
+        target_id=contract.id,
         message=f"删除付款记录：金额={p.amount}",
         extra={
             "contract_id": contract.id,
@@ -1430,7 +1633,7 @@ def delete_payment(contract_id, pay_id):
         },
     )
 
-    db.session.delete(p)
+    #db.session.delete(p)
     db.session.commit()
     flash('付款记录已删除')
     return redirect(url_for('contracts.manage_payments', contract_id=contract.id))
@@ -1466,26 +1669,40 @@ def manage_invoices(contract_id):
             flash('日期格式错误')
             return redirect(url_for('contracts.manage_invoices', contract_id=contract.id))
 
-        inv = Invoice(
-            contract_id=contract.id,
-            invoice_number=invoice_number or None,
+        # inv = Invoice(
+        #     contract_id=contract.id,
+        #     invoice_number=invoice_number or None,
+        #     amount=amount,
+        #     date=d,
+        #     remarks=remarks,
+        # )
+        # db.session.add(inv)
+        # db.session.flush()
+
+        # 交给 Finance Service 创建开票记录
+        inv = create_invoice(
+            contract=contract,
+            invoice_number=invoice_number,
             amount=amount,
-            date=d,
+            inv_date=d,
             remarks=remarks,
         )
-        db.session.add(inv)
-        db.session.flush()
+
 
         # 写入操作日志
         log_operation(
             user=user,
             action='invoice.create',
-            target_type='Invoice',
-            target_id=inv.id,
+            target_type='Contract',
+            target_id=contract.id,
             message=f"新增开票：发票号={invoice_number or ''}, 金额={amount}",
             extra={
+                "invoice_id": inv.id,
                 "contract_id": contract.id,
+                "invoice_number": invoice_number or None,
+                "amount": float(amount),
                 "date": d.isoformat() if d else None,
+                "remarks": remarks or None,
             },
         )
 
@@ -1511,21 +1728,26 @@ def delete_invoice(contract_id, inv_id):
     user_id = session.get('user_id')
     user = User.query.get(user_id) if user_id else None
     contract = Contract.query.get_or_404(contract_id)
-    inv = Invoice.query.filter_by(id=inv_id, contract_id=contract.id).first_or_404()
+    #inv = Invoice.query.filter_by(id=inv_id, contract_id=contract.id).first_or_404()
+    # 交给 Finance Service 删除
+    inv = delete_invoice(contract=contract, inv_id=inv_id)
     log_operation(
         user=user,
         action='invoice.delete',
-        target_type='Invoice',
-        target_id=inv.id,
+        target_type='Contract',
+        target_id=contract.id,
         message=f"删除开票记录：发票号={inv.invoice_number or ''}",
         extra={
+            "invoice_id": inv.id,
             "contract_id": contract.id,
+            "invoice_number": inv.invoice_number,
             "amount": float(inv.amount) if inv.amount is not None else None,
             "date": inv.date.isoformat() if inv.date else None,
+            "remarks": inv.remarks,
         },
     )
 
-    db.session.delete(inv)
+    #db.session.delete(inv)
     db.session.commit()
     flash('开票记录已删除')
     return redirect(url_for('contracts.manage_invoices', contract_id=contract.id))
@@ -1561,15 +1783,26 @@ def manage_refunds(contract_id):
             flash('日期格式错误')
             return redirect(url_for('contracts.manage_refunds', contract_id=contract.id))
 
-        refund = Refund(
-            contract_id=contract.id,
+        # refund = Refund(
+        #     contract_id=contract.id,
+        #     amount=amount,
+        #     date=d,
+        #     reason=reason or None,
+        #     remarks=remarks or None,
+        # )
+        # db.session.add(refund)
+        # db.session.flush()  # 先拿到 refund.id
+
+        # 交给 Finance Service 创建退款记录
+        refund = create_refund(
+            contract=contract,
             amount=amount,
-            date=d,
-            reason=reason or None,
-            remarks=remarks or None,
+            refund_date=d,
+            reason=reason,
+            remarks=remarks,
         )
-        db.session.add(refund)
-        db.session.flush()  # 先拿到 refund.id
+        # 此时已经 flush，可以安全使用 refund.id 写日志
+
 
         # 写操作日志
         if user:
@@ -1580,12 +1813,14 @@ def manage_refunds(contract_id):
                 target_id=contract.id,
                 message=f"新增退款：金额={amount}，日期={d.strftime('%Y-%m-%d')}",
                 extra={
+                    "refund_id": refund.id,
                     "contract_id": contract.id,
                     "project_code": contract.project_code,
                     "contract_number": contract.contract_number,
-                    "amount": amount,
+                    "amount": float(amount),
                     "date": d.isoformat(),
                     "reason": refund.reason,
+                    "remarks": refund.remarks,
                 },
             )
 
@@ -1615,7 +1850,9 @@ def delete_refund(contract_id, refund_id):
     user = User.query.get(user_id) if user_id else None
 
     contract = Contract.query.get_or_404(contract_id)
-    refund = Refund.query.filter_by(id=refund_id, contract_id=contract.id).first_or_404()
+    #refund = Refund.query.filter_by(id=refund_id, contract_id=contract.id).first_or_404()
+    # 交给 Finance Service 查询 + delete（不提交事务）
+    refund = delete_refund(contract=contract, refund_id=refund_id)
 
     # 🔹 写日志，挂在合同下面
     if user:
@@ -1627,13 +1864,15 @@ def delete_refund(contract_id, refund_id):
             message=f"删除退款记录：金额={float(refund.amount) if refund.amount is not None else None}",
             extra={
                 "refund_id": refund.id,
+                "contract_id": contract.id,
                 "amount": float(refund.amount) if refund.amount is not None else None,
                 "date": refund.date.isoformat() if refund.date else None,
                 "reason": refund.reason,
+                "remarks": refund.remarks,
             },
         )
 
-    db.session.delete(refund)
+    #db.session.delete(refund)
     db.session.commit()
     flash('退款记录已删除')
     return redirect(url_for('contracts.manage_refunds', contract_id=contract.id))
